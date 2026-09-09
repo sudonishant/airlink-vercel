@@ -9,12 +9,20 @@
       "destination": "/api/index.py"
     },
     {
-      "source": "/static/:match*",
-      "destination": "/public/:match*"
+      "source": "/static/css/:match*",
+      "destination": "/css/:match*"
     },
     {
-      "source": "/((?!api|files|static|public).*)",
-      "destination": "/public/index.html"
+      "source": "/static/js/:match*",
+      "destination": "/js/:match*"
+    },
+    {
+      "source": "/static/icons/:match*",
+      "destination": "/icons/:match*"
+    },
+    {
+      "source": "/static/:match*",
+      "destination": "/:match*"
     }
   ]
 }
