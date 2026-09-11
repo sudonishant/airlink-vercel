@@ -108,15 +108,62 @@
 
   const toastContainer = document.getElementById('toast-container');
 
+  const CACHE_KEY = 'airlink_cached_history';
+  const PINNED_CACHE_KEY = 'airlink_cached_pinned';
+
   // Initialize
   function init() {
     checkNameOnboarding();
     loadLocalSettings();
+    loadCachedHistory(); // ⚡ Instant 0ms offline-first loading from localStorage!
     initWebSocket();
     fetchHistory();
     fetchSystemInfo();
     setupEventListeners();
     registerServiceWorker();
+  }
+
+  // Load History from localStorage
+  function loadCachedHistory() {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          items = parsed;
+          renderFeed();
+          scrollToBottom();
+        }
+      }
+      const cachedPin = localStorage.getItem(PINNED_CACHE_KEY);
+      if (cachedPin) {
+        currentPinnedId = cachedPin;
+        updatePinnedBar();
+      }
+    } catch (e) {}
+  }
+
+  // Save History to localStorage
+  function saveHistoryToLocalStorage() {
+    try {
+      const toCache = items.slice(-80).map(item => {
+        if (item.is_view_once && (item.is_consumed || localStorage.getItem('vo_opened_' + item.id) === 'true')) {
+          return { ...item, view_url: '', content: '🔂 View Once (Opened)', is_consumed: true };
+        }
+        return item;
+      });
+      localStorage.setItem(CACHE_KEY, JSON.stringify(toCache));
+      if (currentPinnedId) {
+        localStorage.setItem(PINNED_CACHE_KEY, currentPinnedId);
+      } else {
+        localStorage.removeItem(PINNED_CACHE_KEY);
+      }
+    } catch (e) {
+      try {
+        const stripped = items.slice(-25).map(x => ({ ...x, view_url: (x.category === 'image' && x.view_url && x.view_url.length > 50000) ? '' : x.view_url }));
+        localStorage.setItem(CACHE_KEY, JSON.stringify(stripped));
+      } catch (err) {}
+    }
   }
 
   // Name Onboarding Check
@@ -267,6 +314,7 @@
             renderFeed();
             updatePinnedBar();
             scrollToBottom(); // Auto-scroll to show new message immediately!
+            saveHistoryToLocalStorage(); // 💾 Save to localStorage!
 
             // Alert user for newly arrived items from other devices
             freshArrivals.forEach(newItem => {
@@ -298,6 +346,7 @@
         renderFeed();
         scrollToBottom();
         playNotificationSound();
+        saveHistoryToLocalStorage();
       }
 
       if (item.sender !== deviceName) {
@@ -314,11 +363,14 @@
         updatePinnedBar();
       }
       renderFeed();
+      saveHistoryToLocalStorage();
     } else if (data.type === 'history_cleared') {
       items = [];
       currentPinnedId = null;
       updatePinnedBar();
       renderFeed();
+      localStorage.removeItem(CACHE_KEY);
+      localStorage.removeItem(PINNED_CACHE_KEY);
     }
   }
 
@@ -333,6 +385,7 @@
         renderFeed();
         updatePinnedBar();
         scrollToBottom();
+        saveHistoryToLocalStorage(); // 💾 Save to localStorage!
       }
     } catch (err) {
       console.warn('Could not fetch history:', err);
@@ -776,6 +829,7 @@
     items.push(tempItem);
     renderFeed();
     scrollToBottom();
+    saveHistoryToLocalStorage(); // 💾 Instantly save to localStorage!
 
     // 2. Clear input immediately so user can type next message
     textInput.value = '';
@@ -800,6 +854,7 @@
           const idx = items.findIndex(x => x.id === tempId);
           if (idx !== -1) {
             items[idx] = data.item;
+            saveHistoryToLocalStorage();
           }
         }
       }
@@ -848,6 +903,7 @@
               items.push(data.item);
               renderFeed();
               scrollToBottom();
+              saveHistoryToLocalStorage(); // 💾 Save to localStorage!
             }
           } catch (e) {}
           showToast(`${file.name} sent 🚀`, 'success');
