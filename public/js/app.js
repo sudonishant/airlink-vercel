@@ -233,6 +233,14 @@
     }
   }
 
+  let unreadCount = 0;
+  const originalDocumentTitle = document.title;
+
+  window.addEventListener('focus', () => {
+    unreadCount = 0;
+    document.title = originalDocumentTitle;
+  });
+
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
@@ -248,15 +256,38 @@
             updatePinnedBar();
           }
 
-          if (JSON.stringify(newItems.map(x => x.id + (x.is_consumed ? 'c' : ''))) !== 
-              JSON.stringify(items.map(x => x.id + (x.is_consumed ? 'c' : '')))) {
+          // Check if items changed
+          const prevIds = new Set(items.map(x => x.id));
+          const hasChanges = JSON.stringify(newItems.map(x => x.id + (x.is_consumed ? 'c' : ''))) !== 
+                             JSON.stringify(items.map(x => x.id + (x.is_consumed ? 'c' : '')));
+
+          if (hasChanges) {
+            const freshArrivals = newItems.filter(x => !prevIds.has(x.id));
             items = newItems;
             renderFeed();
             updatePinnedBar();
+            scrollToBottom(); // Auto-scroll to show new message immediately!
+
+            // Alert user for newly arrived items from other devices
+            freshArrivals.forEach(newItem => {
+              if (newItem.sender !== deviceName && newItem.type !== 'system') {
+                playNotificationSound();
+                showToast(`New ${newItem.category} from ${newItem.sender} 🚀`, 'success');
+
+                if (!document.hasFocus()) {
+                  unreadCount++;
+                  document.title = `(${unreadCount}) 💬 New Message - AirLink`;
+                }
+
+                if (newItem.type === 'text' && isAutoCopyEnabled && !newItem.is_view_once) {
+                  navigator.clipboard.writeText(newItem.content).catch(() => {});
+                }
+              }
+            });
           }
         }
       } catch (e) {}
-    }, 2500);
+    }, 1000); // ⚡ Fast 1-second auto-refresh!
   }
 
   function handleWebSocketMessage(data) {
@@ -453,17 +484,19 @@
     };
     btnBox.appendChild(btnPin);
 
-    // Delete Button
-    const btnDel = document.createElement('button');
-    btnDel.className = 'tg-bubble-action-btn';
-    btnDel.title = 'Delete';
-    btnDel.innerHTML = '✕';
-    btnDel.style.cssText = 'background: rgba(0,0,0,0.4); border: none; color: #fff; border-radius: 50%; width: 22px; height: 22px; font-size: 0.7rem; cursor: pointer; display: flex; align-items: center; justify-content: center;';
-    btnDel.onclick = (e) => {
-      e.stopPropagation();
-      deleteItem(item.id);
-    };
-    btnBox.appendChild(btnDel);
+    // Delete Button - ONLY for outgoing messages (User can ONLY delete their own messages!)
+    if (isOutgoing) {
+      const btnDel = document.createElement('button');
+      btnDel.className = 'tg-bubble-action-btn';
+      btnDel.title = 'Delete my message';
+      btnDel.innerHTML = '✕';
+      btnDel.style.cssText = 'background: rgba(0,0,0,0.4); border: none; color: #fff; border-radius: 50%; width: 22px; height: 22px; font-size: 0.7rem; cursor: pointer; display: flex; align-items: center; justify-content: center;';
+      btnDel.onclick = (e) => {
+        e.stopPropagation();
+        deleteItem(item.id);
+      };
+      btnBox.appendChild(btnDel);
+    }
 
     bubble.onmouseenter = () => { btnBox.style.opacity = '1'; };
     bubble.onmouseleave = () => { btnBox.style.opacity = '0'; };
@@ -600,17 +633,31 @@
     return row;
   }
 
-  // Handle View Once Item Click
+  // Handle View Once Item Click (STRICT 1-TIME VIEW ONLY)
   function handleViewOnceClick(item) {
-    if (item.is_consumed) return;
-
-    if (item.category === 'image' && item.view_url) {
-      openLightbox(item.view_url, '🔂 View Once Photo', item.download_url);
-    } else {
-      alert(`🔂 View Once Message:\n\n${item.content}`);
+    const isAlreadyOpened = item.is_consumed || localStorage.getItem('vo_opened_' + item.id) === 'true';
+    if (isAlreadyOpened) {
+      showToast('This message has already been opened! 🔂', 'info');
+      return;
     }
 
-    // Mark as consumed immediately
+    // Immediately mark consumed in localStorage and in-memory
+    item.is_consumed = true;
+    localStorage.setItem('vo_opened_' + item.id, 'true');
+
+    if (item.category === 'image' && item.view_url) {
+      const photoUrl = item.view_url;
+      item.view_url = ''; // Erase immediately so it can never be retrieved
+      lightboxDownload.style.display = 'none';
+      openLightbox(photoUrl, '🔂 View Once Photo (Disappears on close)');
+    } else {
+      const textVal = item.content;
+      item.content = '🔂 View Once Message (Opened)';
+      alert(`🔂 View Once Message:\n\n${textVal}`);
+      renderFeed();
+    }
+
+    // Inform server to burn this message permanently
     consumeViewOnce(item.id);
   }
 
@@ -624,6 +671,8 @@
       const local = items.find(x => x.id === itemId);
       if (local) {
         local.is_consumed = true;
+        local.view_url = '';
+        local.content = '🔂 View Once (Opened)';
         renderFeed();
       }
     } catch (e) {}
@@ -697,22 +746,44 @@
     }
   }
 
-  // Send Text Message
+  // Send Text Message (⚡ Ultra-Fast 0ms Optimistic Response)
   async function sendTextMessage() {
     const text = textInput.value.trim();
     if (!text) return;
 
     const isVO = isViewOnceActive;
-    // Reset View Once toggle after setting payload
     if (isViewOnceActive) {
       isViewOnceActive = false;
       btnViewOnce.classList.remove('active');
     }
 
-    try {
-      textInput.disabled = true;
-      btnSend.disabled = true;
+    // 1. Instantly append to chat in 0ms (Zero delay!)
+    const tempId = `temp_${Date.now()}`;
+    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const tempItem = {
+      id: tempId,
+      type: 'text',
+      category: 'text',
+      content: text,
+      is_url: text.startsWith('http://') || text.startsWith('https://'),
+      sender: deviceName,
+      is_view_once: isVO,
+      is_consumed: false,
+      timestamp: timestamp,
+      time_epoch: Date.now() / 1000
+    };
 
+    items.push(tempItem);
+    renderFeed();
+    scrollToBottom();
+
+    // 2. Clear input immediately so user can type next message
+    textInput.value = '';
+    textInput.style.height = 'auto';
+    textInput.focus();
+
+    // 3. Send in background
+    try {
       const res = await fetch('/send/text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -723,27 +794,17 @@
         })
       });
 
-      if (!res.ok) {
-        throw new Error('Failed to send');
-      }
-
-      const data = await res.json();
-      if (data && data.item) {
-        if (!items.some(x => x.id === data.item.id)) {
-          items.push(data.item);
-          renderFeed();
-          scrollToBottom();
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.item) {
+          const idx = items.findIndex(x => x.id === tempId);
+          if (idx !== -1) {
+            items[idx] = data.item;
+          }
         }
       }
-
-      textInput.value = '';
-      textInput.style.height = 'auto';
     } catch (err) {
       showToast('Error sending message', 'error');
-    } finally {
-      textInput.disabled = false;
-      btnSend.disabled = false;
-      textInput.focus();
     }
   }
 
@@ -875,24 +936,30 @@
   function closeLightbox() {
     lightboxModal.classList.add('hidden');
     lightboxImage.src = '';
+    lightboxDownload.style.display = ''; // restore download button for standard photos
+    renderFeed(); // Re-render to ensure view once shows consumed
   }
 
-  // Delete Item
+  // Delete Item (ONLY own messages, with instant optimistic removal)
   async function deleteItem(id) {
-    try {
-      const res = await fetch(`/history/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        items = items.filter(x => x.id !== id);
-        if (currentPinnedId === id) {
-          currentPinnedId = null;
-          updatePinnedBar();
-        }
-        renderFeed();
-        showToast('Item deleted', 'info');
-      }
-    } catch (err) {
-      showToast('Failed to delete item', 'error');
+    const item = items.find(x => x.id === id);
+    if (item && item.sender !== deviceName) {
+      showToast('You can only delete your own messages! ⚠️', 'error');
+      return;
     }
+
+    // Instantly remove from screen in 0ms!
+    items = items.filter(x => x.id !== id);
+    if (currentPinnedId === id) {
+      currentPinnedId = null;
+      updatePinnedBar();
+    }
+    renderFeed();
+    showToast('Message deleted', 'info');
+
+    try {
+      await fetch(`/history/${id}?sender=${encodeURIComponent(deviceName)}`, { method: 'DELETE' });
+    } catch (err) {}
   }
 
   async function clearAllHistory() {

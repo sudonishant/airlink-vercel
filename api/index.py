@@ -348,9 +348,17 @@ async def download_file(filename: str):
     raise HTTPException(status_code=404, detail="File not found")
 
 @router.delete("/history/{item_id}")
-async def delete_item(item_id: str):
+async def delete_item(item_id: str, sender: Optional[str] = None):
     global history_cache
     load_data()
+    item = next((x for x in history_cache if x.get("id") == item_id), None)
+    if not item:
+        return {"success": True}
+    
+    # Enforce ownership: only the original sender can delete
+    if sender and item.get("sender") and item.get("sender") != sender:
+        raise HTTPException(status_code=403, detail="You can only delete your own messages")
+        
     history_cache = [x for x in history_cache if x.get("id") != item_id]
     save_to_gist()
     return {"success": True}
