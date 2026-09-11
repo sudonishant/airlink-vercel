@@ -20,11 +20,17 @@
   let recordingTimerInterval = null;
   let networkInfo = null;
 
-  // Detect Device Name
+  // New Feature States
+  let currentUserName = localStorage.getItem('airlink_user_name') || '';
+  let isViewOnceActive = false;
+  let currentPinnedId = null;
+
+  // Detect Device Platform
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  const deviceName = isMobile 
+  const defaultDevice = isMobile 
     ? (/iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'iPhone' : 'Android') 
     : 'Kali PC';
+  let deviceName = currentUserName || defaultDevice;
 
   // DOM Elements
   const feedContainer = document.getElementById('feed-container');
@@ -39,6 +45,7 @@
   
   const btnAttachFile = document.getElementById('btn-attach-file');
   const btnOpenCamera = document.getElementById('btn-open-camera');
+  const btnViewOnce = document.getElementById('btn-view-once');
   const btnQuickPhoto = document.getElementById('btn-quick-photo');
   const btnQuickFile = document.getElementById('btn-quick-file');
 
@@ -65,6 +72,20 @@
   const btnMoreMenu = document.getElementById('btn-more-menu');
   const moreMenuDropdown = document.getElementById('more-menu-dropdown');
   const btnClearHistory = document.getElementById('btn-clear-history');
+  const btnOpenChangeName = document.getElementById('btn-open-change-name');
+
+  const pinnedBar = document.getElementById('pinned-bar');
+  const pinnedText = document.getElementById('pinned-text');
+  const btnUnpin = document.getElementById('btn-unpin');
+
+  const nameModal = document.getElementById('name-modal');
+  const initialNameInput = document.getElementById('initial-name-input');
+  const btnSaveInitialName = document.getElementById('btn-save-initial-name');
+
+  const changeNameModal = document.getElementById('change-name-modal');
+  const newNameInput = document.getElementById('new-name-input');
+  const btnCancelChangeName = document.getElementById('btn-cancel-change-name');
+  const btnConfirmChangeName = document.getElementById('btn-confirm-change-name');
 
   const uploadProgressContainer = document.getElementById('upload-progress-container');
   const uploadStatusText = document.getElementById('upload-status-text');
@@ -89,13 +110,25 @@
 
   // Initialize
   function init() {
-    currentDeviceTag.textContent = deviceName;
+    checkNameOnboarding();
     loadLocalSettings();
     initWebSocket();
     fetchHistory();
     fetchSystemInfo();
     setupEventListeners();
     registerServiceWorker();
+  }
+
+  // Name Onboarding Check
+  function checkNameOnboarding() {
+    currentUserName = localStorage.getItem('airlink_user_name') || '';
+    if (!currentUserName) {
+      nameModal.classList.remove('hidden');
+      setTimeout(() => initialNameInput && initialNameInput.focus(), 250);
+    } else {
+      deviceName = currentUserName;
+      currentDeviceTag.textContent = currentUserName;
+    }
   }
 
   function loadLocalSettings() {
@@ -148,7 +181,7 @@
     }, 2800);
   }
 
-  // WebSocket & Smart Polling Connection (for Vercel Serverless)
+  // WebSocket & Smart Polling Connection (for Vercel Cloud Serverless)
   let pollInterval = null;
 
   function initWebSocket() {
@@ -208,10 +241,18 @@
         if (res.ok) {
           const data = await res.json();
           const newItems = (data.items || []).reverse();
-          if (newItems.length !== items.length) {
+          const newPinnedId = data.pinned_id || null;
+
+          if (newPinnedId !== currentPinnedId) {
+            currentPinnedId = newPinnedId;
+            updatePinnedBar();
+          }
+
+          if (JSON.stringify(newItems.map(x => x.id + (x.is_consumed ? 'c' : ''))) !== 
+              JSON.stringify(items.map(x => x.id + (x.is_consumed ? 'c' : '')))) {
             items = newItems;
             renderFeed();
-            scrollToBottom();
+            updatePinnedBar();
           }
         }
       } catch (e) {}
@@ -231,21 +272,22 @@
       if (item.sender !== deviceName) {
         showToast(`New ${item.category} from ${item.sender}`, 'success');
 
-        if (item.type === 'text' && isAutoCopyEnabled) {
-          copyToClipboard(item.content, false);
-          showToast('Text auto-copied to clipboard', 'info');
+        if (item.type === 'text' && isAutoCopyEnabled && !item.is_view_once) {
+          navigator.clipboard.writeText(item.content).catch(() => {});
         }
       }
     } else if (data.type === 'item_deleted') {
       items = items.filter(x => x.id !== data.id);
+      if (currentPinnedId === data.id) {
+        currentPinnedId = null;
+        updatePinnedBar();
+      }
       renderFeed();
     } else if (data.type === 'history_cleared') {
       items = [];
+      currentPinnedId = null;
+      updatePinnedBar();
       renderFeed();
-      showToast('All messages cleared', 'info');
-    } else if (data.type === 'client_count') {
-      const count = data.count || 1;
-      tgStatusText.textContent = count > 1 ? `${count} devices online` : 'online';
     }
   }
 
@@ -256,7 +298,9 @@
       if (res.ok) {
         const data = await res.json();
         items = (data.items || []).reverse();
+        currentPinnedId = data.pinned_id || null;
         renderFeed();
+        updatePinnedBar();
         scrollToBottom();
       }
     } catch (err) {
@@ -269,6 +313,10 @@
       const res = await fetch('/info');
       if (res.ok) {
         networkInfo = await res.json();
+        if (networkInfo.pinned_id) {
+          currentPinnedId = networkInfo.pinned_id;
+          updatePinnedBar();
+        }
         populateNetworkIPs();
       }
     } catch (err) {
@@ -277,12 +325,11 @@
   }
 
   function populateNetworkIPs() {
-    if (!networkInfo) return;
+    if (!networkInfo || !ipSelect) return;
     ipSelect.innerHTML = '';
 
     const port = networkInfo.port || 5000;
 
-    // 1. Add Global Internet URL first if available
     if (networkInfo.global_url) {
       const globOpt = document.createElement('option');
       globOpt.value = networkInfo.global_url;
@@ -290,7 +337,6 @@
       ipSelect.appendChild(globOpt);
     }
 
-    // 2. Add .local permanent hostname option
     if (networkInfo.hostname) {
       const hostOpt = document.createElement('option');
       hostOpt.value = `http://${networkInfo.hostname}.local:${port}`;
@@ -298,7 +344,6 @@
       ipSelect.appendChild(hostOpt);
     }
     
-    // 3. Add Raw IP interfaces
     if (networkInfo.ips) {
       networkInfo.ips.forEach(iface => {
         const opt = document.createElement('option');
@@ -312,6 +357,7 @@
   }
 
   function updateSelectedIP() {
+    if (!ipSelect || !directUrlInput || !qrImage) return;
     const selectedUrl = ipSelect.value || window.location.origin;
     directUrlInput.value = selectedUrl;
     
@@ -372,6 +418,15 @@
 
   // Create Telegram Chat Bubble
   function createTelegramBubble(item) {
+    // 📢 System Message (Name change alert)
+    if (item.type === 'system' || item.category === 'system') {
+      const row = document.createElement('div');
+      row.className = 'tg-msg-row system';
+      row.dataset.id = item.id;
+      row.innerHTML = `<div class="tg-system-pill">${escapeHtml(item.content)}</div>`;
+      return row;
+    }
+
     const isOutgoing = (item.sender === deviceName);
     
     const row = document.createElement('div');
@@ -381,107 +436,278 @@
     const bubble = document.createElement('div');
     bubble.className = 'tg-bubble';
 
-    // Delete Button on Hover
+    // Top action controls (Pin & Delete)
+    const btnBox = document.createElement('div');
+    btnBox.className = 'tg-bubble-actions';
+    btnBox.style.cssText = 'position: absolute; top: 4px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s; z-index: 5;';
+
+    // Pin Button
+    const btnPin = document.createElement('button');
+    btnPin.className = 'tg-bubble-action-btn';
+    btnPin.title = 'Pin message';
+    btnPin.innerHTML = '📌';
+    btnPin.style.cssText = 'background: rgba(0,0,0,0.4); border: none; color: #fff; border-radius: 50%; width: 22px; height: 22px; font-size: 0.7rem; cursor: pointer; display: flex; align-items: center; justify-content: center;';
+    btnPin.onclick = (e) => {
+      e.stopPropagation();
+      pinMessage(item.id);
+    };
+    btnBox.appendChild(btnPin);
+
+    // Delete Button
     const btnDel = document.createElement('button');
-    btnDel.className = 'tg-bubble-delete';
+    btnDel.className = 'tg-bubble-action-btn';
     btnDel.title = 'Delete';
     btnDel.innerHTML = '✕';
+    btnDel.style.cssText = 'background: rgba(0,0,0,0.4); border: none; color: #fff; border-radius: 50%; width: 22px; height: 22px; font-size: 0.7rem; cursor: pointer; display: flex; align-items: center; justify-content: center;';
     btnDel.onclick = (e) => {
       e.stopPropagation();
       deleteItem(item.id);
     };
-    bubble.appendChild(btnDel);
+    btnBox.appendChild(btnDel);
+
+    bubble.onmouseenter = () => { btnBox.style.opacity = '1'; };
+    bubble.onmouseleave = () => { btnBox.style.opacity = '0'; };
+    bubble.appendChild(btnBox);
 
     // Incoming Sender Label
     if (!isOutgoing) {
       const sender = document.createElement('div');
       sender.className = 'tg-bubble-sender';
-      sender.textContent = item.sender || 'Other Device';
+      sender.textContent = item.sender || 'Friend';
       bubble.appendChild(sender);
     }
 
-    // Content based on category
-    if (item.type === 'text') {
-      if (item.is_url) {
-        const urlEl = document.createElement('a');
-        urlEl.className = 'tg-bubble-url';
-        urlEl.href = item.content;
-        urlEl.target = '_blank';
-        urlEl.rel = 'noopener';
-        urlEl.textContent = item.content;
-        bubble.appendChild(urlEl);
+    // 🔂 View Once Card Rendering
+    if (item.is_view_once) {
+      const voCard = document.createElement('div');
+      voCard.className = `tg-view-once-card ${item.is_consumed ? 'consumed' : ''}`;
+
+      if (item.is_consumed) {
+        voCard.innerHTML = `
+          <div class="tg-vo-icon">1️⃣</div>
+          <div class="tg-vo-info">
+            <div class="tg-vo-title">View Once ${item.category === 'image' ? 'Photo' : 'Message'}</div>
+            <div class="tg-vo-desc">Opened / Expired</div>
+          </div>
+        `;
       } else {
-        const textEl = document.createElement('div');
-        textEl.className = 'tg-bubble-text';
-        textEl.textContent = item.content;
-        bubble.appendChild(textEl);
+        voCard.innerHTML = `
+          <div class="tg-vo-icon">1️⃣</div>
+          <div class="tg-vo-info">
+            <div class="tg-vo-title">View Once ${item.category === 'image' ? 'Photo' : 'Message'}</div>
+            <div class="tg-vo-desc">${isOutgoing ? 'Sent (One-time view)' : 'Tap to view (Disappears after opening)'}</div>
+          </div>
+        `;
+        voCard.onclick = () => {
+          handleViewOnceClick(item);
+        };
       }
-    } else if (item.category === 'image') {
-      const mediaWrap = document.createElement('div');
-      mediaWrap.className = 'tg-media-image';
-      mediaWrap.onclick = () => openLightbox(item.view_url, item.filename, item.download_url);
-
-      const img = document.createElement('img');
-      img.src = item.view_url;
-      img.alt = item.filename;
-      img.loading = 'lazy';
-      mediaWrap.appendChild(img);
-      bubble.appendChild(mediaWrap);
-    } else if (item.category === 'audio') {
-      const audioWrap = document.createElement('div');
-      audioWrap.className = 'tg-audio-bubble';
-      audioWrap.innerHTML = `
-        <div style="font-size: 0.8rem; color: var(--tg-text-secondary); margin-bottom: 2px;">🎙️ ${escapeHtml(item.filename)} (${item.formatted_size})</div>
-        <audio controls preload="metadata" src="${item.view_url}"></audio>
-      `;
-      bubble.appendChild(audioWrap);
-    } else if (item.category === 'video') {
-      const videoWrap = document.createElement('div');
-      videoWrap.className = 'tg-video-bubble';
-      videoWrap.innerHTML = `
-        <video controls preload="metadata" src="${item.view_url}"></video>
-        <div style="font-size: 0.75rem; color: var(--tg-text-secondary); margin-top: 4px;">${escapeHtml(item.filename)} (${item.formatted_size})</div>
-      `;
-      bubble.appendChild(videoWrap);
+      bubble.appendChild(voCard);
     } else {
-      // Document / Archive File
-      const ext = (item.filename && item.filename.includes('.')) 
-        ? item.filename.split('.').pop().substring(0, 4).toUpperCase() 
-        : 'DOC';
+      // Standard Permanent Content Rendering
+      if (item.type === 'text') {
+        if (item.is_url) {
+          const urlEl = document.createElement('a');
+          urlEl.className = 'tg-bubble-url';
+          urlEl.href = item.content;
+          urlEl.target = '_blank';
+          urlEl.rel = 'noopener';
+          urlEl.textContent = item.content;
+          bubble.appendChild(urlEl);
+        } else {
+          const textEl = document.createElement('div');
+          textEl.className = 'tg-bubble-text';
+          textEl.textContent = item.content;
+          bubble.appendChild(textEl);
+        }
+      } else if (item.category === 'image') {
+        const mediaWrap = document.createElement('div');
+        mediaWrap.className = 'tg-media-image';
+        mediaWrap.onclick = () => openLightbox(item.view_url, item.filename, item.download_url);
 
-      const fileCard = document.createElement('a');
-      fileCard.className = 'tg-file-card';
-      fileCard.href = item.download_url;
-      fileCard.download = item.filename || 'file';
-      fileCard.innerHTML = `
-        <div class="tg-file-icon-circle">${escapeHtml(ext)}</div>
-        <div class="tg-file-info">
-          <div class="tg-file-title" title="${escapeHtml(item.filename)}">${escapeHtml(item.filename)}</div>
-          <div class="tg-file-sub">${item.formatted_size || ''}</div>
-        </div>
-        <div class="tg-file-download-btn">⬇️</div>
-      `;
-      bubble.appendChild(fileCard);
+        const img = document.createElement('img');
+        img.src = item.view_url;
+        img.alt = item.filename;
+        img.loading = 'lazy';
+        mediaWrap.appendChild(img);
+        bubble.appendChild(mediaWrap);
+      } else if (item.category === 'audio') {
+        const audioWrap = document.createElement('div');
+        audioWrap.className = 'tg-audio-bubble';
+        audioWrap.innerHTML = `
+          <div style="font-size: 0.8rem; color: var(--tg-text-secondary); margin-bottom: 2px;">🎙️ ${escapeHtml(item.filename)} (${item.formatted_size})</div>
+          <audio controls preload="metadata" src="${item.view_url}"></audio>
+        `;
+        bubble.appendChild(audioWrap);
+      } else if (item.category === 'video') {
+        const videoWrap = document.createElement('div');
+        videoWrap.className = 'tg-video-bubble';
+        videoWrap.innerHTML = `
+          <video controls preload="metadata" src="${item.view_url}"></video>
+          <div style="font-size: 0.75rem; color: var(--tg-text-secondary); margin-top: 4px;">${escapeHtml(item.filename)} (${item.formatted_size})</div>
+        `;
+        bubble.appendChild(videoWrap);
+      } else {
+        // Document / Archive File
+        const ext = (item.filename && item.filename.includes('.')) 
+          ? item.filename.split('.').pop().substring(0, 4).toUpperCase() 
+          : 'DOC';
+
+        const fileCard = document.createElement('a');
+        fileCard.className = 'tg-file-card';
+        fileCard.href = item.download_url;
+        fileCard.download = item.filename || 'file';
+        fileCard.target = '_blank';
+        fileCard.innerHTML = `
+          <div class="tg-file-icon-wrap">
+            <span class="tg-file-ext">${escapeHtml(ext)}</span>
+          </div>
+          <div class="tg-file-details">
+            <div class="tg-file-name">${escapeHtml(item.original_name || item.filename)}</div>
+            <div class="tg-file-meta">${item.formatted_size} • Click to Download</div>
+          </div>
+          <div class="tg-file-arrow">⬇️</div>
+        `;
+        bubble.appendChild(fileCard);
+      }
     }
 
-    // Bottom Meta (Time + Double Checkmarks)
+    // Bubble Metadata (Time, checks, pin status)
     const meta = document.createElement('div');
     meta.className = 'tg-bubble-meta';
-    const timeStr = formatTime(item.timestamp);
-    meta.innerHTML = `
-      <span>${timeStr}</span>
-      ${isOutgoing ? '<span class="tg-checkmarks">✓✓</span>' : ''}
-    `;
-    bubble.appendChild(meta);
 
+    if (currentPinnedId === item.id) {
+      const pinIndicator = document.createElement('span');
+      pinIndicator.textContent = '📌 ';
+      pinIndicator.title = 'Pinned Message';
+      meta.appendChild(pinIndicator);
+    }
+
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'tg-bubble-time';
+    timeSpan.textContent = formatTime(item.timestamp);
+    meta.appendChild(timeSpan);
+
+    if (isOutgoing) {
+      const checks = document.createElement('span');
+      checks.className = 'tg-bubble-checks';
+      checks.textContent = '✓✓';
+      meta.appendChild(checks);
+    }
+
+    bubble.appendChild(meta);
     row.appendChild(bubble);
     return row;
+  }
+
+  // Handle View Once Item Click
+  function handleViewOnceClick(item) {
+    if (item.is_consumed) return;
+
+    if (item.category === 'image' && item.view_url) {
+      openLightbox(item.view_url, '🔂 View Once Photo', item.download_url);
+    } else {
+      alert(`🔂 View Once Message:\n\n${item.content}`);
+    }
+
+    // Mark as consumed immediately
+    consumeViewOnce(item.id);
+  }
+
+  async function consumeViewOnce(itemId) {
+    try {
+      await fetch('/view_once/consume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: itemId })
+      });
+      const local = items.find(x => x.id === itemId);
+      if (local) {
+        local.is_consumed = true;
+        renderFeed();
+      }
+    } catch (e) {}
+  }
+
+  // 📌 Pin & Unpin Handlers
+  async function pinMessage(id) {
+    try {
+      const res = await fetch('/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: id })
+      });
+      if (res.ok) {
+        currentPinnedId = id;
+        updatePinnedBar();
+        renderFeed();
+        showToast('Message pinned 📌', 'success');
+      }
+    } catch (e) {
+      showToast('Could not pin message', 'error');
+    }
+  }
+
+  async function unpinMessage() {
+    try {
+      const res = await fetch('/unpin', { method: 'POST' });
+      if (res.ok) {
+        currentPinnedId = null;
+        updatePinnedBar();
+        renderFeed();
+        showToast('Message unpinned', 'info');
+      }
+    } catch (e) {
+      showToast('Could not unpin message', 'error');
+    }
+  }
+
+  function updatePinnedBar() {
+    if (!pinnedBar || !pinnedText) return;
+    if (!currentPinnedId) {
+      pinnedBar.classList.add('hidden');
+      return;
+    }
+
+    const pinnedItem = items.find(x => x.id === currentPinnedId);
+    if (!pinnedItem) {
+      pinnedBar.classList.add('hidden');
+      return;
+    }
+
+    pinnedBar.classList.remove('hidden');
+    let summary = '';
+    if (pinnedItem.type === 'text') {
+      summary = pinnedItem.content;
+    } else if (pinnedItem.category === 'image') {
+      summary = `📷 Photo (${pinnedItem.filename})`;
+    } else {
+      summary = `📎 ${pinnedItem.original_name || pinnedItem.filename}`;
+    }
+    pinnedText.textContent = `${pinnedItem.sender}: ${summary}`;
+  }
+
+  function jumpToPinnedMessage() {
+    if (!currentPinnedId) return;
+    const el = document.querySelector(`.tg-msg-row[data-id="${currentPinnedId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('highlight-pinned');
+      setTimeout(() => el.classList.remove('highlight-pinned'), 2000);
+    }
   }
 
   // Send Text Message
   async function sendTextMessage() {
     const text = textInput.value.trim();
     if (!text) return;
+
+    const isVO = isViewOnceActive;
+    // Reset View Once toggle after setting payload
+    if (isViewOnceActive) {
+      isViewOnceActive = false;
+      btnViewOnce.classList.remove('active');
+    }
 
     try {
       textInput.disabled = true;
@@ -492,13 +718,13 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: text,
-          device: deviceName
+          device: deviceName,
+          is_view_once: isVO
         })
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({ detail: 'Failed to send' }));
-        throw new Error(errData.detail || 'Server error');
+        throw new Error('Failed to send');
       }
 
       const data = await res.json();
@@ -525,10 +751,17 @@
   function uploadFiles(fileList, customCategory = null) {
     if (!fileList || fileList.length === 0) return;
 
+    const isVO = isViewOnceActive;
+    if (isViewOnceActive) {
+      isViewOnceActive = false;
+      btnViewOnce.classList.remove('active');
+    }
+
     Array.from(fileList).forEach(file => {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('sender', deviceName);
+      formData.append('is_view_once', isVO ? 'true' : 'false');
       if (customCategory) formData.append('custom_type', customCategory);
 
       const xhr = new XMLHttpRequest();
@@ -603,36 +836,45 @@
         const secs = String(elapsed % 60).padStart(2, '0');
         recordingTimer.textContent = `${mins}:${secs}`;
       }, 500);
-
     } catch (err) {
-      showToast('Microphone access denied', 'error');
+      showToast('Microphone permission denied', 'error');
     }
   }
 
-  function stopAndSendRecording() {
+  function stopRecording(send = true) {
     if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
 
     mediaRecorder.onstop = () => {
-      clearInterval(recordingTimerInterval);
       voiceOverlay.classList.add('hidden');
+      clearInterval(recordingTimerInterval);
 
-      const mimeType = mediaRecorder.mimeType || 'audio/webm';
-      const ext = mimeType.includes('ogg') ? 'ogg' : (mimeType.includes('wav') ? 'wav' : 'webm');
-      const audioBlob = new Blob(audioChunks, { type: mimeType });
-      const audioFile = new File([audioBlob], `voice_note_${Date.now()}.${ext}`, { type: mimeType });
-
-      uploadFiles([audioFile], 'audio');
+      if (send && audioChunks.length > 0) {
+        const mimeType = mediaRecorder.mimeType || 'audio/webm';
+        const blob = new Blob(audioChunks, { type: mimeType });
+        const ext = mimeType.includes('ogg') ? 'ogg' : (mimeType.includes('mp4') ? 'm4a' : 'webm');
+        const file = new File([blob], `VoiceNote_${Date.now()}.${ext}`, { type: mimeType });
+        uploadFiles([file], 'audio');
+      }
+      audioChunks = [];
     };
 
     mediaRecorder.stop();
   }
 
-  function cancelRecording() {
-    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
-    mediaRecorder.stop();
-    clearInterval(recordingTimerInterval);
-    voiceOverlay.classList.add('hidden');
-    audioChunks = [];
+  // Lightbox Viewer
+  function openLightbox(url, title = 'Photo', downloadUrl = null) {
+    lightboxImage.src = url;
+    lightboxTitle.textContent = title;
+    lightboxDownload.href = downloadUrl || url;
+    lightboxDownload.download = title;
+    currentRotation = 0;
+    lightboxImage.style.transform = `rotate(0deg)`;
+    lightboxModal.classList.remove('hidden');
+  }
+
+  function closeLightbox() {
+    lightboxModal.classList.add('hidden');
+    lightboxImage.src = '';
   }
 
   // Delete Item
@@ -641,6 +883,10 @@
       const res = await fetch(`/history/${id}`, { method: 'DELETE' });
       if (res.ok) {
         items = items.filter(x => x.id !== id);
+        if (currentPinnedId === id) {
+          currentPinnedId = null;
+          updatePinnedBar();
+        }
         renderFeed();
         showToast('Item deleted', 'info');
       }
@@ -655,6 +901,8 @@
       const res = await fetch('/history', { method: 'DELETE' });
       if (res.ok) {
         items = [];
+        currentPinnedId = null;
+        updatePinnedBar();
         renderFeed();
         showToast('History cleared', 'info');
       }
@@ -663,44 +911,106 @@
     }
   }
 
-  // Copy to Clipboard
-  async function copyToClipboard(text, showNotification = true) {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        textarea.remove();
-      }
-      if (showNotification) showToast('Copied to clipboard', 'success');
-    } catch (e) {
-      if (showNotification) showToast('Could not copy', 'error');
-    }
-  }
-
-  // Lightbox Modal
-  function openLightbox(url, title, downloadUrl) {
-    currentRotation = 0;
-    lightboxImage.style.transform = 'rotate(0deg)';
-    lightboxImage.src = url;
-    lightboxTitle.textContent = title || 'Photo';
-    lightboxDownload.href = downloadUrl || url;
-    lightboxDownload.setAttribute('download', title || 'photo');
-    lightboxModal.classList.remove('hidden');
-  }
-
-  function closeLightbox() {
-    lightboxModal.classList.add('hidden');
-    lightboxImage.src = '';
-  }
-
-  // Event Listeners
+  // Setup Event Listeners
   function setupEventListeners() {
-    // Send message
+    // 1️⃣ First-time Name Setup Save
+    if (btnSaveInitialName) {
+      btnSaveInitialName.addEventListener('click', () => {
+        const name = initialNameInput.value.trim();
+        if (!name) {
+          showToast('Please enter your name', 'error');
+          initialNameInput.focus();
+          return;
+        }
+        localStorage.setItem('airlink_user_name', name);
+        currentUserName = name;
+        deviceName = name;
+        currentDeviceTag.textContent = name;
+        nameModal.classList.add('hidden');
+        showToast(`Welcome, ${name}! ✈️`, 'success');
+      });
+      initialNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') btnSaveInitialName.click();
+      });
+    }
+
+    // ✏️ Change Name Flow with Announcement
+    if (btnOpenChangeName) {
+      btnOpenChangeName.addEventListener('click', () => {
+        moreMenuDropdown.classList.remove('show');
+        newNameInput.value = currentUserName || '';
+        changeNameModal.classList.remove('hidden');
+        setTimeout(() => newNameInput.focus(), 200);
+      });
+    }
+
+    if (btnCancelChangeName) {
+      btnCancelChangeName.addEventListener('click', () => {
+        changeNameModal.classList.add('hidden');
+      });
+    }
+
+    if (btnConfirmChangeName) {
+      btnConfirmChangeName.addEventListener('click', async () => {
+        const newName = newNameInput.value.trim();
+        if (!newName) {
+          showToast('Name cannot be empty', 'error');
+          return;
+        }
+        if (newName === currentUserName) {
+          changeNameModal.classList.add('hidden');
+          return;
+        }
+
+        const oldName = currentUserName || 'Someone';
+        localStorage.setItem('airlink_user_name', newName);
+        currentUserName = newName;
+        deviceName = newName;
+        currentDeviceTag.textContent = newName;
+        changeNameModal.classList.add('hidden');
+
+        // Broadcast name change alert to everyone in chat!
+        try {
+          await fetch('/send/text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: `📢 "${oldName}" changed their name to "${newName}"`,
+              device: newName,
+              type: 'system'
+            })
+          });
+          fetchHistory();
+        } catch (e) {}
+
+        showToast(`Name updated to ${newName} 📢`, 'success');
+      });
+      newNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') btnConfirmChangeName.click();
+      });
+    }
+
+    // 📌 Pinned Bar click to scroll
+    if (pinnedBar) {
+      pinnedBar.addEventListener('click', jumpToPinnedMessage);
+    }
+    if (btnUnpin) {
+      btnUnpin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        unpinMessage();
+      });
+    }
+
+    // 🔂 View Once Toggle
+    if (btnViewOnce) {
+      btnViewOnce.addEventListener('click', () => {
+        isViewOnceActive = !isViewOnceActive;
+        btnViewOnce.classList.toggle('active', isViewOnceActive);
+        showToast(`View Once ${isViewOnceActive ? 'Enabled 1️⃣ (Disappears after viewing)' : 'Disabled'}`, 'info');
+      });
+    }
+
+    // Send Text on Click & Enter
     btnSend.addEventListener('click', sendTextMessage);
     textInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -709,39 +1019,56 @@
       }
     });
 
+    // Auto-grow Textarea
     textInput.addEventListener('input', () => {
       textInput.style.height = 'auto';
-      textInput.style.height = `${Math.min(textInput.scrollHeight, 80)}px`;
+      textInput.style.height = Math.min(textInput.scrollHeight, 120) + 'px';
     });
 
-    // Attach file button
+    // Attach File / Camera Triggers
     btnAttachFile.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', (e) => {
-      uploadFiles(e.target.files);
-      fileInput.value = '';
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length > 0) {
+        uploadFiles(fileInput.files);
+        fileInput.value = '';
+      }
     });
 
-    // Camera / Photo button
     btnOpenCamera.addEventListener('click', () => cameraInput.click());
-    cameraInput.addEventListener('change', (e) => {
-      uploadFiles(e.target.files);
-      cameraInput.value = '';
+    cameraInput.addEventListener('change', () => {
+      if (cameraInput.files.length > 0) {
+        uploadFiles(cameraInput.files, 'image');
+        cameraInput.value = '';
+      }
     });
 
-    // Quick Action Buttons
-    if (btnQuickPhoto) btnQuickPhoto.addEventListener('click', () => cameraInput.click());
-    if (btnQuickFile) btnQuickFile.addEventListener('click', () => fileInput.click());
+    if (btnQuickPhoto) {
+      btnQuickPhoto.addEventListener('click', () => cameraInput.click());
+    }
+    if (btnQuickFile) {
+      btnQuickFile.addEventListener('click', () => fileInput.click());
+    }
 
-    // Voice recording
-    btnRecordVoice.addEventListener('click', startRecording);
-    btnSendRecording.addEventListener('click', stopAndSendRecording);
-    btnCancelRecording.addEventListener('click', cancelRecording);
+    // Voice Record Buttons
+    btnRecordVoice.addEventListener('click', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        stopRecording(true);
+      } else {
+        startRecording();
+      }
+    });
+    btnCancelRecording.addEventListener('click', () => stopRecording(false));
+    btnSendRecording.addEventListener('click', () => stopRecording(true));
 
     // Search Toggle
     tgBtnSearch.addEventListener('click', () => {
       tgSearchBar.classList.toggle('hidden');
       if (!tgSearchBar.classList.contains('hidden')) {
         searchInput.focus();
+      } else {
+        searchQuery = '';
+        searchInput.value = '';
+        renderFeed();
       }
     });
 
@@ -752,96 +1079,98 @@
     });
 
     clearSearchBtn.addEventListener('click', () => {
-      searchInput.value = '';
       searchQuery = '';
+      searchInput.value = '';
       clearSearchBtn.classList.add('hidden');
       renderFeed();
     });
 
-    // Sound toggle
+    // Settings Toggles
     btnToggleSound.addEventListener('click', () => {
       isSoundEnabled = !isSoundEnabled;
       localStorage.setItem('airlink_sound', isSoundEnabled);
       soundIcon.textContent = isSoundEnabled ? '🔔' : '🔕';
-      showToast(isSoundEnabled ? 'Sound alerts on' : 'Sound alerts off', 'info');
-      if (isSoundEnabled) playNotificationSound();
+      showToast(`Sound: ${isSoundEnabled ? 'Enabled' : 'Muted'}`, 'info');
     });
 
-    // Auto-copy toggle
     btnToggleAutoCopy.addEventListener('click', () => {
       isAutoCopyEnabled = !isAutoCopyEnabled;
       localStorage.setItem('airlink_autocopy', isAutoCopyEnabled);
       autoCopyIcon.textContent = isAutoCopyEnabled ? '📋' : '📑';
-      showToast(isAutoCopyEnabled ? 'Auto-copy enabled' : 'Auto-copy disabled', 'info');
+      showToast(`Auto-copy: ${isAutoCopyEnabled ? 'ON' : 'OFF'}`, 'info');
+      moreMenuDropdown.classList.remove('show');
     });
 
-    // QR Modal
-    const openQr = () => {
-      fetchSystemInfo();
-      qrModal.classList.remove('hidden');
-    };
-    btnQrModal.addEventListener('click', openQr);
-    btnCloseQrModal.addEventListener('click', () => qrModal.classList.add('hidden'));
-    qrModal.querySelector('.tg-modal-backdrop').addEventListener('click', () => qrModal.classList.add('hidden'));
-
-    ipSelect.addEventListener('change', updateSelectedIP);
-    btnCopyUrl.addEventListener('click', () => copyToClipboard(directUrlInput.value));
-
-    // More dropdown menu
+    // More Menu
     btnMoreMenu.addEventListener('click', (e) => {
       e.stopPropagation();
       moreMenuDropdown.classList.toggle('show');
     });
+
     document.addEventListener('click', () => {
       moreMenuDropdown.classList.remove('show');
     });
+
     btnClearHistory.addEventListener('click', clearAllHistory);
 
-    // Lightbox events
+    // QR Modal
+    if (btnQrModal) {
+      btnQrModal.addEventListener('click', () => qrModal.classList.remove('hidden'));
+    }
+    if (btnCloseQrModal) {
+      btnCloseQrModal.addEventListener('click', () => qrModal.classList.add('hidden'));
+    }
+    if (ipSelect) {
+      ipSelect.addEventListener('change', updateSelectedIP);
+    }
+    if (btnCopyUrl) {
+      btnCopyUrl.addEventListener('click', () => {
+        navigator.clipboard.writeText(directUrlInput.value).then(() => {
+          showToast('URL copied to clipboard!', 'success');
+        });
+      });
+    }
+
+    // Lightbox controls
     lightboxClose.addEventListener('click', closeLightbox);
-    lightboxModal.querySelector('.tg-lightbox-backdrop').addEventListener('click', closeLightbox);
     lightboxRotate.addEventListener('click', () => {
       currentRotation = (currentRotation + 90) % 360;
       lightboxImage.style.transform = `rotate(${currentRotation}deg)`;
     });
 
-    // Fullscreen Drag & Drop
-    window.addEventListener('dragover', (e) => {
+    // Drag and drop support
+    window.addEventListener('dragenter', (e) => {
       e.preventDefault();
       dragOverlay.classList.remove('hidden');
     });
 
-    window.addEventListener('dragleave', (e) => {
-      if (e.relatedTarget === null) dragOverlay.classList.add('hidden');
+    dragOverlay.addEventListener('dragover', (e) => e.preventDefault());
+    dragOverlay.addEventListener('dragleave', (e) => {
+      if (e.relatedTarget === null || e.target === dragOverlay) {
+        dragOverlay.classList.add('hidden');
+      }
     });
 
-    window.addEventListener('drop', (e) => {
+    dragOverlay.addEventListener('drop', (e) => {
       e.preventDefault();
       dragOverlay.classList.add('hidden');
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         uploadFiles(e.dataTransfer.files);
       }
     });
-
-    // Escape closes modals
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        qrModal.classList.add('hidden');
-        closeLightbox();
-      }
-    });
   }
 
   // Register PWA Service Worker
   function registerServiceWorker() {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+    if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
   }
 
+  // Helper Escape HTML
   function escapeHtml(str) {
     if (!str) return '';
-    return String(str)
+    return str
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -849,6 +1178,6 @@
       .replace(/'/g, '&#039;');
   }
 
-  document.addEventListener('DOMContentLoaded', init);
-
+  // Launch App
+  window.addEventListener('DOMContentLoaded', init);
 })();

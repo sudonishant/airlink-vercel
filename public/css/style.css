@@ -987,3 +987,276 @@ body.tg-theme {
     height: 36px;
   }
 }
+
+/* ==========================================================
+   📌 Telegram Pinned Message Bar
+   ========================================================== */
+.tg-pinned-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--tg-bg-header);
+  border-bottom: 1px solid var(--tg-border);
+  border-left: 3px solid var(--tg-accent-blue);
+  padding: 8px 16px;
+  cursor: pointer;
+  position: relative;
+  z-index: 40;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.tg-pinned-bar:hover {
+  background: var(--tg-bg-hover);
+}
+
+.tg-pinned-icon {
+  font-size: 1.1rem;
+  color: var(--tg-accent-blue);
+  flex-shrink: 0;
+}
+
+.tg-pinned-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tg-pinned-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--tg-accent-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tg-pinned-text {
+  font-size: 0.85rem;
+  color: var(--tg-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tg-pinned-close {
+  background: transparent;
+  border: none;
+  color: var(--tg-text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.tg-pinned-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ff5c5c;
+}
+
+/* ==========================================================
+   🔂 View Once Toggle & Bubbles
+   ========================================================== */
+.tg-btn-view-once {
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.tg-btn-view-once.active {
+  background: var(--tg-accent-blue) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 10px rgba(36, 129, 204, 0.6);
+  transform: scale(1.05);
+}
+
+.view-once-badge {
+  font-size: 1rem;
+}
+
+.tg-view-once-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 10px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.tg-view-once-card:hover {
+  background: rgba(0, 0, 0, 0.35);
+  border-color: var(--tg-accent-cyan);
+}
+
+.tg-view-once-card.consumed {
+  opacity: 0.6;
+  cursor: default;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.tg-vo-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--tg-accent-blue);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+.tg-view-once-card.consumed .tg-vo-icon {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--tg-text-secondary);
+}
+
+.tg-vo-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.tg-vo-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--tg-text-primary);
+}
+
+.tg-vo-desc {
+  font-size: 0.75rem;
+  color: var(--tg-text-secondary);
+}
+
+/* ==========================================================
+   📢 System Messages (Name Change Alert)
+   ========================================================== */
+.tg-msg-row.system {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.tg-system-pill {
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--tg-text-secondary);
+  font-size: 0.78rem;
+  padding: 4px 14px;
+  border-radius: 20px;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(4px);
+  animation: tgFadeIn 0.3s ease;
+}
+
+/* ==========================================================
+   👤 Dialogs & Modals (Onboarding & Name Change)
+   ========================================================== */
+.tg-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+  animation: tgFadeIn 0.25s ease;
+}
+
+.tg-dialog-card {
+  background: var(--tg-bg-header);
+  border: 1px solid var(--tg-border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  animation: tgSlideIn 0.25s ease;
+}
+
+.tg-dialog-icon {
+  font-size: 2.5rem;
+  margin-bottom: 8px;
+}
+
+.tg-dialog-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--tg-text-primary);
+  margin-bottom: 6px;
+}
+
+.tg-dialog-desc {
+  font-size: 0.85rem;
+  color: var(--tg-text-secondary);
+  margin-bottom: 18px;
+  line-height: 1.4;
+}
+
+.tg-dialog-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--tg-border);
+  border-radius: var(--radius-md);
+  color: var(--tg-text-primary);
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  outline: none;
+  margin-bottom: 18px;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.tg-dialog-input:focus {
+  border-color: var(--tg-accent-blue);
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 10px rgba(36, 129, 204, 0.3);
+}
+
+.tg-dialog-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.tg-btn-secondary {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: var(--tg-text-secondary);
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.tg-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--tg-text-primary);
+}
+
+.full-width {
+  width: 100%;
+}
+
+/* Pinned highlight glow */
+.highlight-pinned {
+  animation: pinnedGlow 1.8s ease;
+}
+
+@keyframes pinnedGlow {
+  0% { transform: scale(1); box-shadow: 0 0 0 transparent; }
+  50% { transform: scale(1.02); box-shadow: 0 0 20px rgba(0, 200, 255, 0.8); }
+  100% { transform: scale(1); box-shadow: 0 0 0 transparent; }
+}

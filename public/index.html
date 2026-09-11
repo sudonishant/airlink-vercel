@@ -67,6 +67,9 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="12" cy="19" r="2"></circle></svg>
           </button>
           <div id="more-menu-dropdown" class="tg-dropdown-menu">
+            <button id="btn-open-change-name" class="tg-menu-item">
+              <span>✏️</span> Change Name
+            </button>
             <a href="/api/download-all-zip" class="tg-menu-item">
               <span>📦</span> Download All (ZIP)
             </a>
@@ -80,6 +83,16 @@
         </div>
       </div>
     </header>
+
+    <!-- Pinned Message Bar -->
+    <div id="pinned-bar" class="tg-pinned-bar hidden">
+      <div class="tg-pinned-icon">📌</div>
+      <div class="tg-pinned-content" id="pinned-content">
+        <div class="tg-pinned-title">Pinned Message</div>
+        <div class="tg-pinned-text" id="pinned-text">...</div>
+      </div>
+      <button id="btn-unpin" class="tg-pinned-close" title="Unpin message">✕</button>
+    </div>
 
     <!-- Search Bar (Collapsible) -->
     <div id="tg-search-bar" class="tg-search-bar hidden">
@@ -161,6 +174,11 @@
         <button id="btn-open-camera" class="tg-dock-btn" title="Take or Choose Photo">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
         </button>
+
+        <!-- View Once Toggle Button -->
+        <button id="btn-view-once" class="tg-dock-btn tg-btn-view-once" title="Toggle View Once (Disappears after 1 view)">
+          <span class="view-once-badge">1️⃣</span>
+        </button>
       </div>
 
       <!-- Text Input Area -->
@@ -240,6 +258,30 @@
       </div>
       <div class="tg-lightbox-img-wrap">
         <img id="lightbox-image" src="" alt="Enlarged photo">
+      </div>
+    </div>
+  </div>
+
+  <!-- First-Time Name Setup Modal -->
+  <div id="name-modal" class="tg-modal-overlay hidden">
+    <div class="tg-dialog-card">
+      <div class="tg-dialog-icon">✈️</div>
+      <h3 class="tg-dialog-title">Welcome to AirLink</h3>
+      <p class="tg-dialog-desc">Enter your name so others in the chat know who you are:</p>
+      <input type="text" id="initial-name-input" class="tg-dialog-input" placeholder="Your Name (e.g. Nishant)" maxlength="25">
+      <button id="btn-save-initial-name" class="tg-btn-primary full-width">Join Chat 🚀</button>
+    </div>
+  </div>
+
+  <!-- Change Name Modal -->
+  <div id="change-name-modal" class="tg-modal-overlay hidden">
+    <div class="tg-dialog-card">
+      <h3 class="tg-dialog-title">Change Display Name</h3>
+      <p class="tg-dialog-desc">⚠️ Everyone in the chat will be notified of this name change.</p>
+      <input type="text" id="new-name-input" class="tg-dialog-input" placeholder="New Name" maxlength="25">
+      <div class="tg-dialog-actions">
+        <button id="btn-cancel-change-name" class="tg-btn-secondary">Cancel</button>
+        <button id="btn-confirm-change-name" class="tg-btn-primary">Update Name 📢</button>
       </div>
     </div>
   </div>
