@@ -1,16 +1,16 @@
 {
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
+      "source": "/api/:path*",
+      "destination": "/:path*"
     },
     {
-      "source": "/files/(.*)",
-      "destination": "/api/index.py"
+      "source": "/files/:path*",
+      "destination": "/download/:path*"
     },
     {
-      "source": "/static/(.*)",
-      "destination": "/$1"
+      "source": "/static/:path*",
+      "destination": "/:path*"
     }
   ]
 }

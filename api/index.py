@@ -179,8 +179,8 @@ async def upload_file(
         "file_size": file_size,
         "formatted_size": format_size(file_size),
         "mime_type": mime_type,
-        "download_url": f"/api/download/{dest_path.name}",
-        "view_url": data_url or f"/api/download/{dest_path.name}",
+        "download_url": f"/download/{dest_path.name}",
+        "view_url": data_url or f"/download/{dest_path.name}",
         "sender": sender,
         "timestamp": timestamp,
         "time_epoch": time_epoch

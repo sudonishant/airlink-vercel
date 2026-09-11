@@ -204,7 +204,7 @@
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
       try {
-        const res = await fetch('/api/history');
+        const res = await fetch('/history');
         if (res.ok) {
           const data = await res.json();
           const newItems = (data.items || []).reverse();
@@ -215,7 +215,7 @@
           }
         }
       } catch (e) {}
-    }, 3000);
+    }, 2500);
   }
 
   function handleWebSocketMessage(data) {
@@ -252,23 +252,28 @@
   // Fetch History from Server
   async function fetchHistory() {
     try {
-      const res = await fetch('/api/history');
-      const data = await res.json();
-      items = (data.items || []).reverse(); // Oldest first
-      renderFeed();
-      scrollToBottom();
+      const res = await fetch('/history');
+      if (res.ok) {
+        const data = await res.json();
+        items = (data.items || []).reverse();
+        renderFeed();
+        scrollToBottom();
+      }
     } catch (err) {
-      console.error('Failed to fetch history:', err);
+      console.warn('Could not fetch history:', err);
     }
   }
 
-  // Fetch Network & System Info
   async function fetchSystemInfo() {
     try {
-      const res = await fetch('/api/info');
-      networkInfo = await res.json();
-      populateNetworkIPs();
-    } catch (err) {}
+      const res = await fetch('/info');
+      if (res.ok) {
+        networkInfo = await res.json();
+        populateNetworkIPs();
+      }
+    } catch (err) {
+      console.warn('Could not fetch system info:', err);
+    }
   }
 
   function populateNetworkIPs() {
@@ -482,7 +487,7 @@
       textInput.disabled = true;
       btnSend.disabled = true;
 
-      const res = await fetch('/api/send/text', {
+      const res = await fetch('/send/text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -562,7 +567,7 @@
         showToast(`Network error uploading ${file.name}`, 'error');
       };
 
-      xhr.open('POST', '/api/send/file', true);
+      xhr.open('POST', '/send/file', true);
       xhr.send(formData);
     });
   }
@@ -633,26 +638,28 @@
   // Delete Item
   async function deleteItem(id) {
     try {
-      const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Delete failed');
-      items = items.filter(x => x.id !== id);
-      renderFeed();
+      const res = await fetch(`/history/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        items = items.filter(x => x.id !== id);
+        renderFeed();
+        showToast('Item deleted', 'info');
+      }
     } catch (err) {
-      showToast('Could not delete item', 'error');
+      showToast('Failed to delete item', 'error');
     }
   }
 
-  // Clear All History
   async function clearAllHistory() {
-    if (!confirm('Are you sure you want to delete all messages?')) return;
+    if (!confirm('Are you sure you want to clear all history?')) return;
     try {
-      const res = await fetch('/api/history', { method: 'DELETE' });
-      if (!res.ok) throw new Error('Clear failed');
-      items = [];
-      renderFeed();
-      showToast('All messages deleted', 'info');
+      const res = await fetch('/history', { method: 'DELETE' });
+      if (res.ok) {
+        items = [];
+        renderFeed();
+        showToast('History cleared', 'info');
+      }
     } catch (err) {
-      showToast('Could not clear messages', 'error');
+      showToast('Failed to clear history', 'error');
     }
   }
 
