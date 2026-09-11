@@ -217,7 +217,6 @@
       } catch (e) {}
     }, 3000);
   }
-  }
 
   function handleWebSocketMessage(data) {
     if (data.type === 'new_item') {

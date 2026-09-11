@@ -6,7 +6,7 @@ import mimetypes
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, APIRouter
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,7 +20,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# /tmp is the only writable directory on Vercel Serverless
+@app.middleware("http")
+async def fix_path(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if "/index.py" in path:
+        request.scope["path"] = path.replace("/index.py", "") or "/"
+    return await call_next(request)
+
+# /tmp is the writable storage directory on Vercel Serverless
 STORAGE_DIR = Path("/tmp/airlink_data")
 FILES_DIR = STORAGE_DIR / "files"
 HISTORY_FILE = STORAGE_DIR / "history.json"
@@ -71,7 +78,9 @@ def categorize_file(filename: str, mime: str) -> str:
         return "document"
     return "other"
 
-@app.get("/api/info")
+router = APIRouter()
+
+@router.get("/info")
 async def get_info():
     return {
         "status": "online",
@@ -79,23 +88,24 @@ async def get_info():
         "total_items": len(history_cache)
     }
 
-@app.get("/api/history")
+@router.get("/history")
 async def get_history():
+    load_data()
     return {"items": history_cache}
 
-# Endpoint for Kali PC to sync pending files & messages
-@app.get("/api/sync/pending")
+@router.get("/sync/pending")
 async def get_pending_sync(since_epoch: float = 0.0):
+    load_data()
     pending = [item for item in history_cache if item.get("time_epoch", 0) > since_epoch]
     return {
         "count": len(pending),
         "items": sorted(pending, key=lambda x: x.get("time_epoch", 0))
     }
 
-@app.post("/api/send/text")
+@router.post("/send/text")
 async def send_text(data: Dict[str, Any]):
     content = data.get("text", "").strip()
-    sender_device = data.get("device", "Mobile Phone")
+    sender_device = data.get("device", "Device")
     if not content:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
     
@@ -114,14 +124,15 @@ async def send_text(data: Dict[str, Any]):
         "time_epoch": time_epoch
     }
     
+    load_data()
     history_cache.insert(0, item)
     save_data()
     return {"success": True, "item": item}
 
-@app.post("/api/send/file")
+@router.post("/send/file")
 async def upload_file(
     file: UploadFile = File(...),
-    sender: str = Form("Mobile Phone"),
+    sender: str = Form("Device"),
     custom_type: Optional[str] = Form(None)
 ):
     original_name = file.filename or "file"
@@ -141,8 +152,11 @@ async def upload_file(
         counter += 1
         
     content_bytes = await file.read()
-    with open(dest_path, "wb") as f:
-        f.write(content_bytes)
+    try:
+        with open(dest_path, "wb") as f:
+            f.write(content_bytes)
+    except Exception:
+        pass
         
     file_size = len(content_bytes)
     mime_type, _ = mimetypes.guess_type(str(dest_path))
@@ -150,9 +164,9 @@ async def upload_file(
     
     category = custom_type or categorize_file(dest_path.name, mime_type)
     
-    # Store base64 data url for small files/images so they never get lost across serverless cold starts
+    # Store base64 data url for images/audio under 4MB so they always preview and persist
     data_url = None
-    if file_size < 3 * 1024 * 1024:
+    if file_size < 4 * 1024 * 1024:
         b64 = base64.b64encode(content_bytes).decode("utf-8")
         data_url = f"data:{mime_type};base64,{b64}"
     
@@ -172,38 +186,45 @@ async def upload_file(
         "time_epoch": time_epoch
     }
     
+    load_data()
     history_cache.insert(0, item)
     save_data()
     return {"success": True, "item": item}
 
-@app.get("/api/download/{filename}")
+@router.get("/download/{filename}")
 async def download_file(filename: str):
     file_path = FILES_DIR / filename
-    if not file_path.exists():
-        # Check if item in history has data url
-        item = next((x for x in history_cache if x.get("filename") == filename), None)
-        if item and item.get("view_url", "").startswith("data:"):
-            header, encoded = item["view_url"].split(",", 1)
-            raw = base64.b64decode(encoded)
-            mime = header.split(";")[0].replace("data:", "")
-            return Response(content=raw, media_type=mime, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
-        raise HTTPException(status_code=404, detail="File not found")
+    load_data()
+    if file_path.exists():
+        with open(file_path, "rb") as f:
+            data = f.read()
+        mime, _ = mimetypes.guess_type(filename)
+        return Response(content=data, media_type=mime or "application/octet-stream", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    
+    item = next((x for x in history_cache if x.get("filename") == filename), None)
+    if item and item.get("view_url", "").startswith("data:"):
+        header, encoded = item["view_url"].split(",", 1)
+        raw = base64.b64decode(encoded)
+        mime = header.split(";")[0].replace("data:", "")
+        return Response(content=raw, media_type=mime, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
         
-    with open(file_path, "rb") as f:
-        data = f.read()
-    mime, _ = mimetypes.guess_type(filename)
-    return Response(content=data, media_type=mime or "application/octet-stream", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    raise HTTPException(status_code=404, detail="File not found")
 
-@app.delete("/api/history/{item_id}")
+@router.delete("/history/{item_id}")
 async def delete_item(item_id: str):
     global history_cache
+    load_data()
     history_cache = [x for x in history_cache if x.get("id") != item_id]
     save_data()
     return {"success": True}
 
-@app.delete("/api/history")
+@router.delete("/history")
 async def clear_all():
     global history_cache
     history_cache = []
     save_data()
     return {"success": True}
+
+# Mount both with and without /api prefix
+app.include_router(router, prefix="")
+app.include_router(router, prefix="/api")
