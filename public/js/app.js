@@ -28,6 +28,15 @@
   let activeDmUser = null; // null = General Public Chat; string = target username
   const POPULAR_EMOJIS = ['❤️', '👍', '😂', '🔥', '😮', '😢', '🎉', '🚀'];
 
+  // 🛡️ Privacy & Passcode States
+  let currentPasscode = localStorage.getItem('airlink_passcode') || '';
+  let isAutoLockEnabled = localStorage.getItem('airlink_autolock') === 'true';
+  let isIncognitoMode = localStorage.getItem('airlink_incognito') === 'true';
+  let enteredPin = '';
+  let isPasscodeSetupMode = false;
+  let passcodeStep = 1; // 1 = enter new, 2 = confirm
+  let candidatePin = '';
+
   // Detect Device Platform
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   const defaultDevice = isMobile 
@@ -77,6 +86,10 @@
   const btnClearHistory = document.getElementById('btn-clear-history');
   const btnOpenChangeName = document.getElementById('btn-open-change-name');
 
+  const btnHeaderLock = document.getElementById('btn-header-lock');
+  const headerLockIcon = document.getElementById('header-lock-icon');
+  const btnMenuPrivacy = document.getElementById('btn-menu-privacy');
+
   const pinnedBar = document.getElementById('pinned-bar');
   const pinnedText = document.getElementById('pinned-text');
   const btnUnpin = document.getElementById('btn-unpin');
@@ -87,6 +100,21 @@
   const dmTargetName = document.getElementById('dm-target-name');
   const btnExitDm = document.getElementById('btn-exit-dm');
   const reactionParticlesContainer = document.getElementById('reaction-particles-container');
+
+  const lockScreenOverlay = document.getElementById('lock-screen-overlay');
+  const lockScreenTitle = document.getElementById('lock-screen-title');
+  const lockScreenDesc = document.getElementById('lock-screen-desc');
+  const pinDots = document.getElementById('pin-dots');
+  const pinKeypad = document.getElementById('pin-keypad');
+  const btnKeyCancel = document.getElementById('btn-key-cancel');
+  const btnKeyBackspace = document.getElementById('btn-key-backspace');
+
+  const privacySettingsModal = document.getElementById('privacy-settings-modal');
+  const passcodeStatusLabel = document.getElementById('passcode-status-label');
+  const btnManagePasscode = document.getElementById('btn-manage-passcode');
+  const chkAutolock = document.getElementById('chk-autolock');
+  const chkIncognito = document.getElementById('chk-incognito');
+  const btnClosePrivacy = document.getElementById('btn-close-privacy');
 
   const nameModal = document.getElementById('name-modal');
   const initialNameInput = document.getElementById('initial-name-input');
@@ -125,6 +153,7 @@
   function init() {
     checkNameOnboarding();
     loadLocalSettings();
+    initPrivacySuite(); // 🛡️ Initialize Passcode Lock & Privacy
     loadCachedHistory(); // ⚡ Instant 0ms offline-first loading from localStorage!
     initWebSocket();
     fetchHistory();
@@ -156,6 +185,7 @@
 
   // Save History to localStorage
   function saveHistoryToLocalStorage() {
+    if (isIncognitoMode) return; // 🛡️ Ghost / Incognito Mode: zero trace in localStorage!
     try {
       const toCache = items.slice(-80).map(item => {
         if (item.is_view_once && (item.is_consumed || localStorage.getItem('vo_opened_' + item.id) === 'true')) {
@@ -1399,12 +1429,262 @@
     scrollToBottom();
   }
 
+  // ==========================================================
+  // 🛡️ Privacy & Passcode Lock Management
+  // ==========================================================
+  function initPrivacySuite() {
+    updatePasscodeUI();
+
+    if (chkAutolock) chkAutolock.checked = isAutoLockEnabled;
+    if (chkIncognito) chkIncognito.checked = isIncognitoMode;
+
+    // Auto-lock if passcode is active and session not yet unlocked
+    if (currentPasscode) {
+      const isSessionUnlocked = sessionStorage.getItem('airlink_session_unlocked') === 'true';
+      if (!isSessionUnlocked) {
+        lockApp();
+      }
+    }
+
+    // Auto-lock when tab is switched/minimized
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden' && isAutoLockEnabled && currentPasscode) {
+        lockApp();
+      }
+    });
+
+    // Handle physical keyboard typing for PIN screen
+    window.addEventListener('keydown', (e) => {
+      if (lockScreenOverlay && !lockScreenOverlay.classList.contains('hidden')) {
+        if (e.key >= '0' && e.key <= '9') {
+          handlePinDigit(e.key);
+        } else if (e.key === 'Backspace') {
+          handlePinBackspace();
+        } else if (e.key === 'Escape' && isPasscodeSetupMode) {
+          exitLockScreen();
+        }
+      }
+    });
+  }
+
+  function updatePasscodeUI() {
+    if (headerLockIcon) {
+      headerLockIcon.textContent = currentPasscode ? '🔒' : '🔓';
+    }
+    if (passcodeStatusLabel) {
+      passcodeStatusLabel.textContent = currentPasscode ? 'Passcode Enabled (4-Digit PIN)' : 'No passcode configured';
+    }
+    if (btnManagePasscode) {
+      btnManagePasscode.textContent = currentPasscode ? 'Change / Remove' : 'Set PIN';
+    }
+  }
+
+  function lockApp() {
+    isPasscodeSetupMode = false;
+    enteredPin = '';
+    updatePinDots();
+    if (lockScreenTitle) lockScreenTitle.textContent = 'AirLink Locked';
+    if (lockScreenDesc) lockScreenDesc.textContent = 'Enter 4-digit PIN to access messages';
+    if (btnKeyCancel) btnKeyCancel.style.visibility = 'hidden';
+    if (lockScreenOverlay) lockScreenOverlay.classList.remove('hidden');
+    sessionStorage.removeItem('airlink_session_unlocked');
+  }
+
+  function unlockApp() {
+    if (lockScreenOverlay) lockScreenOverlay.classList.add('hidden');
+    sessionStorage.setItem('airlink_session_unlocked', 'true');
+    enteredPin = '';
+    updatePinDots();
+    showToast('AirLink Unlocked 🔓', 'success');
+  }
+
+  function exitLockScreen() {
+    if (lockScreenOverlay) lockScreenOverlay.classList.add('hidden');
+    enteredPin = '';
+    isPasscodeSetupMode = false;
+    updatePinDots();
+  }
+
+  function startSetPasscodeFlow() {
+    isPasscodeSetupMode = true;
+    passcodeStep = 1;
+    candidatePin = '';
+    enteredPin = '';
+    updatePinDots();
+    if (lockScreenTitle) lockScreenTitle.textContent = 'Set New Passcode';
+    if (lockScreenDesc) lockScreenDesc.textContent = 'Enter a 4-digit PIN for your chat';
+    if (btnKeyCancel) btnKeyCancel.style.visibility = 'visible';
+    if (lockScreenOverlay) lockScreenOverlay.classList.remove('hidden');
+  }
+
+  function updatePinDots() {
+    if (!pinDots) return;
+    const dots = pinDots.querySelectorAll('.tg-pin-dot');
+    dots.forEach((dot, idx) => {
+      dot.classList.toggle('filled', idx < enteredPin.length);
+    });
+  }
+
+  function shakePinDots() {
+    if (!pinDots) return;
+    pinDots.classList.add('error');
+    if (navigator.vibrate) navigator.vibrate(200);
+    setTimeout(() => {
+      pinDots.classList.remove('error');
+      enteredPin = '';
+      updatePinDots();
+    }, 450);
+  }
+
+  function handlePinDigit(digit) {
+    if (enteredPin.length >= 4) return;
+    enteredPin += digit;
+    updatePinDots();
+
+    if (enteredPin.length === 4) {
+      setTimeout(() => {
+        if (isPasscodeSetupMode) {
+          if (passcodeStep === 1) {
+            candidatePin = enteredPin;
+            enteredPin = '';
+            passcodeStep = 2;
+            updatePinDots();
+            if (lockScreenTitle) lockScreenTitle.textContent = 'Confirm Passcode';
+            if (lockScreenDesc) lockScreenDesc.textContent = 'Re-enter your 4-digit PIN to confirm';
+          } else if (passcodeStep === 2) {
+            if (enteredPin === candidatePin) {
+              currentPasscode = enteredPin;
+              localStorage.setItem('airlink_passcode', enteredPin);
+              sessionStorage.setItem('airlink_session_unlocked', 'true');
+              exitLockScreen();
+              updatePasscodeUI();
+              showToast('Passcode Set Successfully! 🔒', 'success');
+            } else {
+              showToast('PINs did not match! Try again', 'error');
+              shakePinDots();
+              passcodeStep = 1;
+              candidatePin = '';
+              if (lockScreenTitle) lockScreenTitle.textContent = 'Set New Passcode';
+              if (lockScreenDesc) lockScreenDesc.textContent = 'Enter a 4-digit PIN for your chat';
+            }
+          }
+        } else {
+          // Unlock verification
+          if (enteredPin === currentPasscode) {
+            unlockApp();
+          } else {
+            shakePinDots();
+            showToast('Incorrect Passcode ❌', 'error');
+          }
+        }
+      }, 150);
+    }
+  }
+
+  function handlePinBackspace() {
+    if (enteredPin.length > 0) {
+      enteredPin = enteredPin.slice(0, -1);
+      updatePinDots();
+    }
+  }
+
   // Setup Event Listeners
   function setupEventListeners() {
+    // 🔒 Passcode Privacy Header Button
+    if (btnHeaderLock) {
+      btnHeaderLock.addEventListener('click', () => {
+        if (currentPasscode) {
+          lockApp();
+        } else {
+          startSetPasscodeFlow();
+        }
+      });
+    }
+
+    // 🛡️ Privacy Menu Item
+    if (btnMenuPrivacy) {
+      btnMenuPrivacy.addEventListener('click', () => {
+        moreMenuDropdown.classList.remove('show');
+        if (privacySettingsModal) privacySettingsModal.classList.remove('hidden');
+      });
+    }
+
+    if (btnClosePrivacy) {
+      btnClosePrivacy.addEventListener('click', () => {
+        if (privacySettingsModal) privacySettingsModal.classList.add('hidden');
+      });
+    }
+
+    if (btnManagePasscode) {
+      btnManagePasscode.addEventListener('click', () => {
+        if (privacySettingsModal) privacySettingsModal.classList.add('hidden');
+        if (currentPasscode) {
+          if (confirm('Do you want to REMOVE the passcode lock?')) {
+            currentPasscode = '';
+            localStorage.removeItem('airlink_passcode');
+            sessionStorage.removeItem('airlink_session_unlocked');
+            updatePasscodeUI();
+            showToast('Passcode removed 🔓', 'info');
+          } else {
+            startSetPasscodeFlow();
+          }
+        } else {
+          startSetPasscodeFlow();
+        }
+      });
+    }
+
+    if (chkAutolock) {
+      chkAutolock.addEventListener('change', (e) => {
+        isAutoLockEnabled = e.target.checked;
+        localStorage.setItem('airlink_autolock', isAutoLockEnabled);
+        showToast(`Auto-lock on tab switch: ${isAutoLockEnabled ? 'ON' : 'OFF'}`, 'info');
+      });
+    }
+
+    if (chkIncognito) {
+      chkIncognito.addEventListener('change', (e) => {
+        isIncognitoMode = e.target.checked;
+        localStorage.setItem('airlink_incognito', isIncognitoMode);
+        if (isIncognitoMode) {
+          localStorage.removeItem(CACHE_KEY);
+          showToast('Ghost / Incognito Mode: ON 🛡️', 'info');
+        } else {
+          saveHistoryToLocalStorage();
+          showToast('Incognito Mode: OFF', 'info');
+        }
+      });
+    }
+
+    // PIN Keypad clicks
+    if (pinKeypad) {
+      pinKeypad.addEventListener('click', (e) => {
+        const btn = e.target.closest('.tg-key-btn');
+        if (!btn) return;
+        const key = btn.dataset.key;
+        if (key !== undefined) {
+          handlePinDigit(key);
+        }
+      });
+    }
+
+    if (btnKeyBackspace) {
+      btnKeyBackspace.addEventListener('click', handlePinBackspace);
+    }
+
+    if (btnKeyCancel) {
+      btnKeyCancel.addEventListener('click', () => {
+        if (isPasscodeSetupMode) {
+          exitLockScreen();
+        }
+      });
+    }
+
     // 🔒 Exit Private DM Mode
     if (btnExitDm) {
       btnExitDm.addEventListener('click', exitDmMode);
     }
+
 
     // 1️⃣ First-time Name Setup Save
     if (btnSaveInitialName) {

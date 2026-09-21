@@ -61,12 +61,20 @@
           <span id="sound-icon">🔔</span>
         </button>
 
+        <!-- Passcode Privacy Lock Button -->
+        <button id="btn-header-lock" class="tg-icon-btn" title="Lock App with Passcode">
+          <span id="header-lock-icon">🔒</span>
+        </button>
+
         <!-- More Menu -->
         <div class="tg-dropdown">
           <button id="btn-more-menu" class="tg-icon-btn" title="More">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="12" cy="19" r="2"></circle></svg>
           </button>
           <div id="more-menu-dropdown" class="tg-dropdown-menu">
+            <button id="btn-menu-privacy" class="tg-menu-item">
+              <span>🛡️</span> Privacy & Passcode Lock
+            </button>
             <button id="btn-open-change-name" class="tg-menu-item">
               <span>✏️</span> Change Name
             </button>
@@ -165,6 +173,8 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
         </button>
       </div>
+    </div>
+
     <!-- Active Private DM Banner -->
     <div id="dm-active-banner" class="tg-dm-banner hidden">
       <div class="tg-dm-info">
@@ -300,6 +310,81 @@
       <div class="tg-dialog-actions">
         <button id="btn-cancel-change-name" class="tg-btn-secondary">Cancel</button>
         <button id="btn-confirm-change-name" class="tg-btn-primary">Update Name 📢</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Telegram Style Passcode Lock Screen -->
+  <div id="lock-screen-overlay" class="tg-lock-overlay hidden">
+    <div class="tg-lock-card">
+      <div class="tg-lock-icon-glow">🔒</div>
+      <h3 id="lock-screen-title" class="tg-dialog-title">AirLink Locked</h3>
+      <p id="lock-screen-desc" class="tg-dialog-desc">Enter 4-digit passcode to unlock chat</p>
+      
+      <div class="tg-pin-dots" id="pin-dots">
+        <span class="tg-pin-dot"></span>
+        <span class="tg-pin-dot"></span>
+        <span class="tg-pin-dot"></span>
+        <span class="tg-pin-dot"></span>
+      </div>
+
+      <div class="tg-pin-keypad" id="pin-keypad">
+        <button type="button" class="tg-key-btn" data-key="1">1</button>
+        <button type="button" class="tg-key-btn" data-key="2">2</button>
+        <button type="button" class="tg-key-btn" data-key="3">3</button>
+        <button type="button" class="tg-key-btn" data-key="4">4</button>
+        <button type="button" class="tg-key-btn" data-key="5">5</button>
+        <button type="button" class="tg-key-btn" data-key="6">6</button>
+        <button type="button" class="tg-key-btn" data-key="7">7</button>
+        <button type="button" class="tg-key-btn" data-key="8">8</button>
+        <button type="button" class="tg-key-btn" data-key="9">9</button>
+        <button type="button" class="tg-key-btn key-text" id="btn-key-cancel">Cancel</button>
+        <button type="button" class="tg-key-btn" data-key="0">0</button>
+        <button type="button" class="tg-key-btn key-text" id="btn-key-backspace">⌫</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Privacy & Security Settings Modal -->
+  <div id="privacy-settings-modal" class="tg-modal-overlay hidden">
+    <div class="tg-dialog-card">
+      <h3 class="tg-dialog-title">🛡️ Privacy & Passcode Lock</h3>
+      <p class="tg-dialog-desc">Protect your messages and attachments from prying eyes.</p>
+      
+      <div class="tg-privacy-options">
+        <div class="tg-privacy-row">
+          <div class="tg-privacy-info">
+            <div class="tg-privacy-title">4-Digit Passcode Lock</div>
+            <div class="tg-subtext" id="passcode-status-label">No passcode set</div>
+          </div>
+          <button id="btn-manage-passcode" class="tg-btn-sm tg-btn-primary">Set PIN</button>
+        </div>
+
+        <div class="tg-privacy-row">
+          <div class="tg-privacy-info">
+            <div class="tg-privacy-title">Auto-Lock on Tab Switch</div>
+            <div class="tg-subtext">Locks instantly when switching apps or tabs</div>
+          </div>
+          <label class="tg-toggle-switch">
+            <input type="checkbox" id="chk-autolock">
+            <span class="tg-toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="tg-privacy-row">
+          <div class="tg-privacy-info">
+            <div class="tg-privacy-title">Incognito / Ghost Mode</div>
+            <div class="tg-subtext">Do not cache chat history in localStorage</div>
+          </div>
+          <label class="tg-toggle-switch">
+            <input type="checkbox" id="chk-incognito">
+            <span class="tg-toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="tg-dialog-actions" style="margin-top: 18px;">
+        <button id="btn-close-privacy" class="tg-btn-primary full-width">Done</button>
       </div>
     </div>
   </div>
