@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt ruff
+
+      - name: Python syntax + lint
+        run: |
+          python -m compileall api/index.py migrate_from_gist.py
+          ruff check api/index.py migrate_from_gist.py --select E9,F,B --ignore B008
+
+      - name: HTML sanity (div balance)
+        run: |
+          python - <<'EOF'
+          from html.parser import HTMLParser
+          VOID={'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'}
+          class C(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.stack=[]
+              def handle_starttag(self,t,a):
+                  if t not in VOID: self.stack.append(t)
+              def handle_endtag(self,t):
+                  if t in VOID: return
+                  assert self.stack and self.stack[-1]==t, f"Mismatched </{t}> — stack: {self.stack[-3:]}"
+                  self.stack.pop()
+          c=C(); c.feed(open('public/index.html').read())
+          assert not c.stack, f"Unclosed tags: {c.stack}"
+          print("HTML OK")
+          EOF
+
+      - name: JS syntax check
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node --check public/js/app.js && node --check public/sw.js
