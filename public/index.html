@@ -84,6 +84,17 @@
       </div>
     </header>
 
+    <!-- Online Users Horizontal Presence Bar -->
+    <div id="online-users-bar" class="tg-online-bar">
+      <div class="tg-online-header">
+        <span class="tg-online-dot"></span>
+        <span id="online-count-badge" class="tg-online-badge-text">1 Online</span>
+      </div>
+      <div id="online-users-list" class="tg-online-chips">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
     <!-- Pinned Message Bar -->
     <div id="pinned-bar" class="tg-pinned-bar hidden">
       <div class="tg-pinned-icon">📌</div>
@@ -154,6 +165,13 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
         </button>
       </div>
+    <!-- Active Private DM Banner -->
+    <div id="dm-active-banner" class="tg-dm-banner hidden">
+      <div class="tg-dm-info">
+        <span class="tg-dm-icon">🔒</span>
+        <span class="tg-dm-text">Private Chat with <strong id="dm-target-name">User</strong></span>
+      </div>
+      <button id="btn-exit-dm" class="tg-btn-exit-dm" title="Back to public chat">✕ Exit Private</button>
     </div>
 
     <!-- Telegram Bottom Input Dock (Always Visible, Mobile-Friendly) -->
@@ -285,6 +303,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Reaction Animated Particles Container -->
+  <div id="reaction-particles-container" class="tg-reaction-particles-container"></div>
 
   <!-- Toast Notification Container -->
   <div id="toast-container" class="tg-toast-container"></div>

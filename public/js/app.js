@@ -24,6 +24,9 @@
   let currentUserName = localStorage.getItem('airlink_user_name') || '';
   let isViewOnceActive = false;
   let currentPinnedId = null;
+  let onlineUsers = [];
+  let activeDmUser = null; // null = General Public Chat; string = target username
+  const POPULAR_EMOJIS = ['❤️', '👍', '😂', '🔥', '😮', '😢', '🎉', '🚀'];
 
   // Detect Device Platform
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -78,6 +81,13 @@
   const pinnedText = document.getElementById('pinned-text');
   const btnUnpin = document.getElementById('btn-unpin');
 
+  const onlineUsersList = document.getElementById('online-users-list');
+  const onlineCountBadge = document.getElementById('online-count-badge');
+  const dmActiveBanner = document.getElementById('dm-active-banner');
+  const dmTargetName = document.getElementById('dm-target-name');
+  const btnExitDm = document.getElementById('btn-exit-dm');
+  const reactionParticlesContainer = document.getElementById('reaction-particles-container');
+
   const nameModal = document.getElementById('name-modal');
   const initialNameInput = document.getElementById('initial-name-input');
   const btnSaveInitialName = document.getElementById('btn-save-initial-name');
@@ -119,6 +129,7 @@
     initWebSocket();
     fetchHistory();
     fetchSystemInfo();
+    startHeartbeat(); // 🟢 Start live presence tracking
     setupEventListeners();
     registerServiceWorker();
   }
@@ -288,11 +299,15 @@
     document.title = originalDocumentTitle;
   });
 
+  function itemSignature(arr) {
+    return arr.map(x => `${x.id}_${x.is_consumed ? 'c' : ''}_${JSON.stringify(x.reactions || {})}`).join('|');
+  }
+
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(async () => {
       try {
-        const res = await fetch('/history');
+        const res = await fetch(`/history?request_user=${encodeURIComponent(deviceName)}`);
         if (res.ok) {
           const data = await res.json();
           const newItems = (data.items || []).reverse();
@@ -303,17 +318,18 @@
             updatePinnedBar();
           }
 
-          // Check if items changed
+          // Check if items or their reactions changed
           const prevIds = new Set(items.map(x => x.id));
-          const hasChanges = JSON.stringify(newItems.map(x => x.id + (x.is_consumed ? 'c' : ''))) !== 
-                             JSON.stringify(items.map(x => x.id + (x.is_consumed ? 'c' : '')));
+          const hasChanges = itemSignature(newItems) !== itemSignature(items);
 
           if (hasChanges) {
             const freshArrivals = newItems.filter(x => !prevIds.has(x.id));
             items = newItems;
             renderFeed();
             updatePinnedBar();
-            scrollToBottom(); // Auto-scroll to show new message immediately!
+            if (freshArrivals.length > 0) {
+              scrollToBottom(); // Auto-scroll when new items arrive
+            }
             saveHistoryToLocalStorage(); // 💾 Save to localStorage!
 
             // Alert user for newly arrived items from other devices
@@ -472,9 +488,23 @@
     return timestamp;
   }
 
-  // Render Telegram Feed
+  // Render Telegram Feed (Anti-Flicker Keyed DOM Reconciliation)
   function renderFeed() {
     const filtered = items.filter(item => {
+      // Direct Private Message (DM) Mode filtering
+      if (activeDmUser) {
+        const isDmMatch = (item.sender === deviceName && item.recipient === activeDmUser) ||
+                          (item.sender === activeDmUser && item.recipient === deviceName) ||
+                          (item.sender === activeDmUser && !item.is_private) ||
+                          (item.sender === deviceName && item.recipient === activeDmUser);
+        if (!isDmMatch) return false;
+      } else {
+        // General Chat: hide private messages that are not meant for this user
+        if (item.is_private && item.sender !== deviceName && item.recipient !== deviceName) {
+          return false;
+        }
+      }
+
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const textMatch = item.content && item.content.toLowerCase().includes(q);
@@ -492,11 +522,57 @@
     }
 
     emptyState.classList.add('hidden');
-    feedList.innerHTML = '';
 
+    // ⚡ Anti-Flicker Keyed DOM Reconciliation:
+    // Retain existing DOM nodes so documents, audio, videos, and images never reload or flicker!
+    const existingNodes = new Map();
+    feedList.querySelectorAll('.tg-msg-row').forEach(node => {
+      if (node.dataset.id) {
+        existingNodes.set(node.dataset.id, node);
+      }
+    });
+
+    const neededIds = new Set(filtered.map(x => x.id));
+
+    // Remove deleted nodes
+    existingNodes.forEach((node, id) => {
+      if (!neededIds.has(id)) {
+        node.remove();
+        existingNodes.delete(id);
+      }
+    });
+
+    // Append or patch in-place
     filtered.forEach(item => {
-      const bubble = createTelegramBubble(item);
-      feedList.appendChild(bubble);
+      let node = existingNodes.get(item.id);
+      if (!node) {
+        // Create new bubble node
+        node = createTelegramBubble(item);
+        feedList.appendChild(node);
+        existingNodes.set(item.id, node);
+      } else {
+        // Update reactions seamlessly without touching media elements
+        const rWrap = node.querySelector('.tg-reactions-wrap');
+        if (rWrap) {
+          renderReactionsInto(rWrap, item);
+        }
+        // Update consumed state for view_once
+        if (item.is_view_once && item.is_consumed) {
+          const voCard = node.querySelector('.tg-view-once-card');
+          if (voCard && !voCard.classList.contains('consumed')) {
+            voCard.classList.add('consumed');
+            voCard.innerHTML = `
+              <div class="tg-vo-icon">1️⃣</div>
+              <div class="tg-vo-info">
+                <div class="tg-vo-title">View Once ${item.category === 'image' ? 'Photo' : 'Message'}</div>
+                <div class="tg-vo-desc">Opened / Expired</div>
+              </div>
+            `;
+          }
+        }
+        // Preserve order
+        feedList.appendChild(node);
+      }
     });
   }
 
@@ -512,20 +588,41 @@
     }
 
     const isOutgoing = (item.sender === deviceName);
+    const isPrivate = Boolean(item.is_private);
     
     const row = document.createElement('div');
-    row.className = `tg-msg-row ${isOutgoing ? 'outgoing' : 'incoming'}`;
+    row.className = `tg-msg-row ${isOutgoing ? 'outgoing' : 'incoming'} ${isPrivate ? 'is-private' : ''}`;
     row.dataset.id = item.id;
 
     const bubble = document.createElement('div');
     bubble.className = 'tg-bubble';
 
-    // Top action controls (Pin & Delete)
+    // 🔒 Private Message Indicator Badge
+    if (isPrivate) {
+      const privBadge = document.createElement('div');
+      privBadge.className = 'tg-private-badge';
+      const otherPerson = isOutgoing ? (item.recipient || 'Recipient') : item.sender;
+      privBadge.innerHTML = `<span>🔒 Private with ${escapeHtml(otherPerson)}</span>`;
+      bubble.appendChild(privBadge);
+    }
+
+    // Top action controls (React, Pin, Delete)
     const btnBox = document.createElement('div');
     btnBox.className = 'tg-bubble-actions';
-    btnBox.style.cssText = 'position: absolute; top: 4px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.15s; z-index: 5;';
 
-    // Pin Button
+    // 1. Emoji Reaction Trigger Button 😊
+    const btnReact = document.createElement('button');
+    btnReact.className = 'tg-bubble-action-btn';
+    btnReact.title = 'React with emoji';
+    btnReact.innerHTML = '😊';
+    btnReact.style.cssText = 'background: rgba(0,0,0,0.4); border: none; color: #fff; border-radius: 50%; width: 22px; height: 22px; font-size: 0.72rem; cursor: pointer; display: flex; align-items: center; justify-content: center;';
+    btnReact.onclick = (e) => {
+      e.stopPropagation();
+      toggleReactionPicker(item.id, bubble, btnReact);
+    };
+    btnBox.appendChild(btnReact);
+
+    // 2. Pin Button 📌
     const btnPin = document.createElement('button');
     btnPin.className = 'tg-bubble-action-btn';
     btnPin.title = 'Pin message';
@@ -537,7 +634,7 @@
     };
     btnBox.appendChild(btnPin);
 
-    // Delete Button - ONLY for outgoing messages (User can ONLY delete their own messages!)
+    // 3. Delete Button - ONLY for outgoing messages
     if (isOutgoing) {
       const btnDel = document.createElement('button');
       btnDel.className = 'tg-bubble-action-btn';
@@ -551,15 +648,19 @@
       btnBox.appendChild(btnDel);
     }
 
-    bubble.onmouseenter = () => { btnBox.style.opacity = '1'; };
-    bubble.onmouseleave = () => { btnBox.style.opacity = '0'; };
     bubble.appendChild(btnBox);
 
-    // Incoming Sender Label
+    // Incoming Sender Label (Clickable to initiate Direct Private Message)
     if (!isOutgoing) {
       const sender = document.createElement('div');
       sender.className = 'tg-bubble-sender';
       sender.textContent = item.sender || 'Friend';
+      sender.style.cursor = 'pointer';
+      sender.title = `Click to private message ${item.sender}`;
+      sender.onclick = (e) => {
+        e.stopPropagation();
+        startDmMode(item.sender);
+      };
       bubble.appendChild(sender);
     }
 
@@ -634,18 +735,18 @@
         `;
         bubble.appendChild(videoWrap);
       } else {
-        // Document / Archive File
+        // Document / Archive File (Anti-flicker optimized)
         const ext = (item.filename && item.filename.includes('.')) 
           ? item.filename.split('.').pop().substring(0, 4).toUpperCase() 
           : 'DOC';
 
         const fileCard = document.createElement('a');
-        fileCard.className = 'tg-file-card';
+        fileCard.className = 'tg-file-card tg-bubble-file';
         fileCard.href = item.download_url;
         fileCard.download = item.filename || 'file';
         fileCard.target = '_blank';
         fileCard.innerHTML = `
-          <div class="tg-file-icon-wrap">
+          <div class="tg-file-icon-wrap tg-file-icon">
             <span class="tg-file-ext">${escapeHtml(ext)}</span>
           </div>
           <div class="tg-file-details">
@@ -657,6 +758,12 @@
         bubble.appendChild(fileCard);
       }
     }
+
+    // Reactions Container
+    const reactionsWrap = document.createElement('div');
+    reactionsWrap.className = 'tg-reactions-wrap';
+    renderReactionsInto(reactionsWrap, item);
+    bubble.appendChild(reactionsWrap);
 
     // Bubble Metadata (Time, checks, pin status)
     const meta = document.createElement('div');
@@ -684,6 +791,138 @@
     bubble.appendChild(meta);
     row.appendChild(bubble);
     return row;
+  }
+
+  // ==========================================================
+  // 😍 Emoji Reactions & Animated Flying Popups
+  // ==========================================================
+  function triggerFloatingParticle(emoji, clientX, clientY) {
+    if (!reactionParticlesContainer) return;
+    const particle = document.createElement('div');
+    particle.className = 'tg-flying-particle';
+    particle.textContent = emoji;
+    particle.style.left = `${clientX || (window.innerWidth / 2)}px`;
+    particle.style.top = `${clientY || (window.innerHeight / 2)}px`;
+    reactionParticlesContainer.appendChild(particle);
+    setTimeout(() => {
+      particle.remove();
+    }, 1100);
+  }
+
+  function toggleReactionPicker(itemId, bubbleEl, triggerBtn) {
+    const existing = document.querySelector('.tg-reactions-picker');
+    if (existing) {
+      const prevId = existing.dataset.forId;
+      existing.remove();
+      if (prevId === itemId) return;
+    }
+
+    const picker = document.createElement('div');
+    picker.className = 'tg-reactions-picker';
+    picker.dataset.forId = itemId;
+
+    POPULAR_EMOJIS.forEach(emoji => {
+      const btn = document.createElement('button');
+      btn.className = 'tg-reaction-emoji-btn';
+      btn.textContent = emoji;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const rect = btn.getBoundingClientRect();
+        triggerFloatingParticle(emoji, rect.left + rect.width / 2, rect.top);
+        handleReaction(itemId, emoji);
+        picker.remove();
+      };
+      picker.appendChild(btn);
+    });
+
+    bubbleEl.appendChild(picker);
+
+    const closeHandler = (e) => {
+      if (!picker.contains(e.target) && e.target !== triggerBtn) {
+        picker.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', closeHandler);
+    }, 60);
+  }
+
+  async function handleReaction(itemId, emoji) {
+    const item = items.find(x => x.id === itemId);
+    if (!item) return;
+
+    // Optimistic UI state update
+    item.reactions = item.reactions || {};
+    const currentUsers = item.reactions[emoji] || [];
+    if (currentUsers.includes(deviceName)) {
+      item.reactions[emoji] = currentUsers.filter(u => u !== deviceName);
+      if (item.reactions[emoji].length === 0) delete item.reactions[emoji];
+    } else {
+      item.reactions[emoji] = [...currentUsers, deviceName];
+    }
+
+    // Instant patch to DOM
+    const row = feedList.querySelector(`.tg-msg-row[data-id="${itemId}"]`);
+    if (row) {
+      const wrap = row.querySelector('.tg-reactions-wrap');
+      if (wrap) renderReactionsInto(wrap, item);
+    }
+    saveHistoryToLocalStorage();
+
+    // Send to backend
+    try {
+      const res = await fetch('/react', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: itemId,
+          emoji: emoji,
+          user: deviceName
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.reactions) {
+          item.reactions = data.reactions;
+          if (row) {
+            const wrap = row.querySelector('.tg-reactions-wrap');
+            if (wrap) renderReactionsInto(wrap, item);
+          }
+          saveHistoryToLocalStorage();
+        }
+      }
+    } catch (e) {}
+  }
+
+  function renderReactionsInto(wrapEl, item) {
+    wrapEl.innerHTML = '';
+    const reactions = item.reactions || {};
+    const emojis = Object.keys(reactions);
+
+    if (emojis.length === 0) {
+      wrapEl.style.display = 'none';
+      return;
+    }
+    wrapEl.style.display = 'flex';
+
+    emojis.forEach(emoji => {
+      const users = reactions[emoji] || [];
+      if (users.length === 0) return;
+      const hasReacted = users.includes(deviceName);
+
+      const pill = document.createElement('button');
+      pill.className = `tg-reaction-pill ${hasReacted ? 'reacted' : ''}`;
+      pill.innerHTML = `<span>${emoji}</span> <span>${users.length}</span>`;
+      pill.title = users.join(', ');
+      pill.onclick = (e) => {
+        e.stopPropagation();
+        const rect = pill.getBoundingClientRect();
+        triggerFloatingParticle(emoji, rect.left + rect.width / 2, rect.top);
+        handleReaction(item.id, emoji);
+      };
+      wrapEl.appendChild(pill);
+    });
   }
 
   // Handle View Once Item Click (STRICT 1-TIME VIEW ONLY)
@@ -813,6 +1052,9 @@
     // 1. Instantly append to chat in 0ms (Zero delay!)
     const tempId = `temp_${Date.now()}`;
     const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const isPrivate = Boolean(activeDmUser);
+    const recipient = activeDmUser;
+
     const tempItem = {
       id: tempId,
       type: 'text',
@@ -822,6 +1064,9 @@
       sender: deviceName,
       is_view_once: isVO,
       is_consumed: false,
+      is_private: isPrivate,
+      recipient: recipient,
+      reactions: {},
       timestamp: timestamp,
       time_epoch: Date.now() / 1000
     };
@@ -844,7 +1089,9 @@
         body: JSON.stringify({
           text: text,
           device: deviceName,
-          is_view_once: isVO
+          is_view_once: isVO,
+          is_private: isPrivate,
+          recipient: recipient
         })
       });
 
@@ -878,6 +1125,10 @@
       formData.append('file', file);
       formData.append('sender', deviceName);
       formData.append('is_view_once', isVO ? 'true' : 'false');
+      if (activeDmUser) {
+        formData.append('is_private', 'true');
+        formData.append('recipient', activeDmUser);
+      }
       if (customCategory) formData.append('custom_type', customCategory);
 
       const xhr = new XMLHttpRequest();
@@ -1034,8 +1285,127 @@
     }
   }
 
+  // ==========================================================
+  // 🟢 Live Online Users Presence & Heartbeat
+  // ==========================================================
+  let heartbeatTimer = null;
+
+  function startHeartbeat() {
+    sendHeartbeat();
+    fetchOnlineUsers();
+
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      sendHeartbeat();
+      fetchOnlineUsers();
+    }, 5000);
+  }
+
+  async function sendHeartbeat() {
+    if (!deviceName) return;
+    try {
+      await fetch('/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user: deviceName,
+          device: isMobile ? (navigator.platform || 'Mobile') : 'PC'
+        })
+      });
+    } catch (e) {}
+  }
+
+  async function fetchOnlineUsers() {
+    try {
+      const res = await fetch('/users/online');
+      if (res.ok) {
+        const data = await res.json();
+        onlineUsers = data.users || [];
+        renderOnlineUsers();
+      }
+    } catch (e) {}
+  }
+
+  function renderOnlineUsers() {
+    if (!onlineUsersList) return;
+    onlineUsersList.innerHTML = '';
+
+    // Ensure self is included
+    const hasSelf = onlineUsers.some(u => u.user === deviceName);
+    const allUsers = hasSelf ? [...onlineUsers] : [{ user: deviceName, device: isMobile ? 'Mobile' : 'PC' }, ...onlineUsers];
+
+    if (onlineCountBadge) {
+      onlineCountBadge.textContent = `${allUsers.length} Online`;
+    }
+
+    allUsers.forEach(u => {
+      const isSelf = (u.user === deviceName);
+      const isDm = (activeDmUser === u.user);
+      const chip = document.createElement('div');
+      chip.className = `tg-online-chip ${isSelf ? 'self' : ''} ${isDm ? 'active-dm' : ''}`;
+
+      const initial = (u.user || '?').charAt(0).toUpperCase();
+      chip.innerHTML = `
+        <div class="tg-chip-avatar">${escapeHtml(initial)}</div>
+        <span>${escapeHtml(u.user)}${isSelf ? ' (You)' : ''}</span>
+        <span class="tg-chip-device">• ${escapeHtml(u.device || 'Online')}</span>
+      `;
+
+      if (!isSelf) {
+        chip.title = isDm ? `Active DM with ${u.user}. Click to return to public chat.` : `Click to private message ${u.user} 🔒`;
+        chip.onclick = () => {
+          if (activeDmUser === u.user) {
+            exitDmMode();
+          } else {
+            startDmMode(u.user);
+          }
+        };
+      } else {
+        chip.title = 'You are online';
+      }
+
+      onlineUsersList.appendChild(chip);
+    });
+  }
+
+  function startDmMode(targetUser) {
+    if (!targetUser || targetUser === deviceName) return;
+    activeDmUser = targetUser;
+    if (dmActiveBanner) {
+      dmActiveBanner.classList.remove('hidden');
+      if (dmTargetName) dmTargetName.textContent = targetUser;
+    }
+    if (textInput) {
+      textInput.placeholder = `🔒 Private message to ${targetUser}...`;
+      textInput.focus();
+    }
+    showToast(`Switched to Private DM with ${targetUser} 🔒`, 'info');
+    renderOnlineUsers();
+    renderFeed();
+    scrollToBottom();
+  }
+
+  function exitDmMode() {
+    activeDmUser = null;
+    if (dmActiveBanner) {
+      dmActiveBanner.classList.add('hidden');
+    }
+    if (textInput) {
+      textInput.placeholder = 'Message...';
+    }
+    showToast('Back to Public Chat 🌐', 'info');
+    renderOnlineUsers();
+    renderFeed();
+    scrollToBottom();
+  }
+
   // Setup Event Listeners
   function setupEventListeners() {
+    // 🔒 Exit Private DM Mode
+    if (btnExitDm) {
+      btnExitDm.addEventListener('click', exitDmMode);
+    }
+
     // 1️⃣ First-time Name Setup Save
     if (btnSaveInitialName) {
       btnSaveInitialName.addEventListener('click', () => {

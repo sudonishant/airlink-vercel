@@ -1260,3 +1260,354 @@ body.tg-theme {
   50% { transform: scale(1.02); box-shadow: 0 0 20px rgba(0, 200, 255, 0.8); }
   100% { transform: scale(1); box-shadow: 0 0 0 transparent; }
 }
+
+/* ==========================================================
+   🟢 Online Users Horizontal Presence Bar
+   ========================================================== */
+.tg-online-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(23, 33, 43, 0.95);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 6px 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+  z-index: 10;
+  transition: all 0.2s ease;
+}
+
+.tg-online-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.tg-online-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 8px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.75rem;
+  color: var(--tg-text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.tg-online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00e676;
+  box-shadow: 0 0 8px #00e676;
+  animation: pulseGreen 2s infinite ease-in-out;
+}
+
+@keyframes pulseGreen {
+  0%, 100% { transform: scale(1); opacity: 1; box-shadow: 0 0 6px #00e676; }
+  50% { transform: scale(1.25); opacity: 0.8; box-shadow: 0 0 12px #00e676; }
+}
+
+.tg-online-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tg-online-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  color: var(--tg-text-primary);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+.tg-online-chip:hover {
+  background: rgba(41, 144, 236, 0.2);
+  border-color: var(--tg-accent-blue);
+  transform: translateY(-1px);
+}
+
+.tg-online-chip.self {
+  border-color: rgba(0, 230, 118, 0.4);
+  background: rgba(0, 230, 118, 0.1);
+}
+
+.tg-online-chip.active-dm {
+  background: linear-gradient(135deg, rgba(255, 179, 0, 0.25), rgba(255, 143, 0, 0.35));
+  border-color: #ffb300;
+  box-shadow: 0 0 10px rgba(255, 179, 0, 0.4);
+  font-weight: 600;
+}
+
+.tg-chip-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--tg-accent-blue);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: bold;
+}
+
+.tg-chip-device {
+  font-size: 0.68rem;
+  color: var(--tg-text-secondary);
+  opacity: 0.8;
+}
+
+/* ==========================================================
+   🔒 Direct Private Messaging (DM) Active Banner
+   ========================================================== */
+.tg-dm-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: linear-gradient(90deg, rgba(255, 160, 0, 0.2), rgba(255, 87, 34, 0.2));
+  border-top: 1px solid rgba(255, 179, 0, 0.4);
+  border-bottom: 1px solid rgba(255, 179, 0, 0.4);
+  animation: tgSlideDown 0.25s ease;
+  z-index: 15;
+}
+
+@keyframes tgSlideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tg-dm-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  color: #ffca28;
+}
+
+.tg-dm-icon {
+  font-size: 1rem;
+}
+
+.tg-btn-exit-dm {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tg-btn-exit-dm:hover {
+  background: #ff5252;
+  border-color: #ff5252;
+}
+
+.tg-private-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 179, 0, 0.2);
+  color: #ffb300;
+  border: 1px solid rgba(255, 179, 0, 0.4);
+  border-radius: 10px;
+  padding: 2px 7px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+/* ==========================================================
+   😍 Emoji Reactions & Floating Animations
+   ========================================================== */
+.tg-bubble-actions {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  z-index: 10;
+}
+
+.tg-bubble:hover .tg-bubble-actions,
+.tg-bubble:active .tg-bubble-actions {
+  opacity: 1;
+}
+
+.tg-reactions-picker {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  background: rgba(23, 33, 43, 0.96);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 24px;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+  animation: pickerPop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes pickerPop {
+  0% { transform: scale(0.6) translateY(10px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+.tg-reaction-emoji-btn {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 4px 3px;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  user-select: none;
+}
+
+.tg-reaction-emoji-btn:hover {
+  transform: scale(1.4);
+}
+
+.tg-reaction-emoji-btn:active {
+  transform: scale(1.1);
+}
+
+/* Reaction Pills on Bubble */
+.tg-reactions-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.tg-reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 2px 7px;
+  font-size: 0.72rem;
+  color: var(--tg-text-primary);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.18s ease;
+}
+
+.tg-reaction-pill:hover {
+  background: rgba(255, 255, 255, 0.16);
+  transform: scale(1.05);
+}
+
+.tg-reaction-pill.reacted {
+  background: rgba(41, 144, 236, 0.3);
+  border-color: var(--tg-accent-blue);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* Floating animated reaction particles */
+.tg-reaction-particles-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+.tg-flying-particle {
+  position: fixed;
+  font-size: 2.2rem;
+  line-height: 1;
+  pointer-events: none;
+  will-change: transform, opacity;
+  animation: floatUpFade 1.1s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+@keyframes floatUpFade {
+  0% {
+    transform: translate(-50%, 0) scale(0.6) rotate(0deg);
+    opacity: 1;
+  }
+  40% {
+    transform: translate(-50%, -45px) scale(1.4) rotate(-8deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -105px) scale(1) rotate(12deg);
+    opacity: 0;
+  }
+}
+
+/* ==========================================================
+   📁 Anti-Flicker Stable File / Document Styles
+   ========================================================== */
+.tg-bubble-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.15);
+  contain: content;
+  transform: translateZ(0); /* Hardware accelerate to eliminate flicker */
+}
+
+.tg-file-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-sm);
+  background: rgba(41, 144, 236, 0.2);
+  border: 1px solid rgba(41, 144, 236, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+
+.tg-file-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.tg-file-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--tg-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tg-file-meta {
+  font-size: 0.72rem;
+  color: var(--tg-text-secondary);
+  margin-top: 2px;
+}
+

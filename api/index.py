@@ -45,6 +45,8 @@ FILES_DIR.mkdir(parents=True, exist_ok=True)
 history_cache = []
 pinned_item_id = None
 last_gist_sync = 0
+online_users = {}  # username -> {"device": device, "last_seen": timestamp}
+
 
 def fetch_from_gist():
     global history_cache, pinned_item_id
@@ -179,10 +181,65 @@ async def get_info():
         "pinned_id": pinned_item_id
     }
 
+@router.post("/heartbeat")
+async def heartbeat(data: Dict[str, Any]):
+    user = data.get("user", "").strip()
+    device = data.get("device", "Device")
+    if user:
+        online_users[user] = {"device": device, "last_seen": time.time()}
+    return {"success": True}
+
+@router.get("/users/online")
+async def get_online_users():
+    now = time.time()
+    active = []
+    for u, info in list(online_users.items()):
+        if now - info.get("last_seen", 0) <= 15:
+            active.append({"user": u, "device": info.get("device", "Device"), "last_seen": info.get("last_seen")})
+        else:
+            online_users.pop(u, None)
+    return {"users": active, "count": len(active)}
+
 @router.get("/history")
-async def get_history():
+async def get_history(request_user: Optional[str] = None):
     load_data()
+    if request_user:
+        visible = []
+        for x in history_cache:
+            if not x.get("is_private"):
+                visible.append(x)
+            elif x.get("sender") == request_user or x.get("recipient") == request_user:
+                visible.append(x)
+        return {"items": visible, "pinned_id": pinned_item_id}
     return {"items": history_cache, "pinned_id": pinned_item_id}
+
+@router.post("/react")
+async def toggle_reaction(data: Dict[str, Any]):
+    global history_cache
+    load_data()
+    target_id = data.get("id")
+    emoji = (data.get("emoji") or "").strip()
+    user = (data.get("user") or "").strip() or "User"
+    
+    if not target_id or not emoji:
+        raise HTTPException(status_code=400, detail="Missing id or emoji")
+        
+    target_item = next((x for x in history_cache if x.get("id") == target_id), None)
+    if not target_item:
+        raise HTTPException(status_code=404, detail="Message not found")
+        
+    reactions = target_item.setdefault("reactions", {})
+    user_list = reactions.setdefault(emoji, [])
+    
+    if user in user_list:
+        user_list.remove(user)
+        if not user_list:
+            reactions.pop(emoji, None)
+    else:
+        user_list.append(user)
+        
+    save_to_gist()
+    return {"success": True, "reactions": target_item.get("reactions", {})}
 
 @router.get("/pinned")
 async def get_pinned():
@@ -236,6 +293,8 @@ async def send_text(data: Dict[str, Any]):
     content = data.get("text", "").strip()
     sender_device = data.get("device", "Device")
     is_view_once = bool(data.get("is_view_once", False))
+    is_private = bool(data.get("is_private", False))
+    recipient = data.get("recipient")
     msg_type = data.get("type", "text")
     
     if not content:
@@ -254,6 +313,9 @@ async def send_text(data: Dict[str, Any]):
         "sender": sender_device,
         "is_view_once": is_view_once,
         "is_consumed": False,
+        "is_private": is_private,
+        "recipient": recipient,
+        "reactions": {},
         "timestamp": timestamp,
         "time_epoch": time_epoch
     }
@@ -268,7 +330,9 @@ async def upload_file(
     file: UploadFile = File(...),
     sender: str = Form("Device"),
     custom_type: Optional[str] = Form(None),
-    is_view_once: bool = Form(False)
+    is_view_once: bool = Form(False),
+    is_private: bool = Form(False),
+    recipient: Optional[str] = Form(None)
 ):
     original_name = file.filename or "file"
     time_epoch = time.time()
@@ -319,6 +383,9 @@ async def upload_file(
         "sender": sender,
         "is_view_once": is_view_once,
         "is_consumed": False,
+        "is_private": is_private,
+        "recipient": recipient,
+        "reactions": {},
         "timestamp": timestamp,
         "time_epoch": time_epoch
     }
