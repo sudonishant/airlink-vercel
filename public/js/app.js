@@ -340,21 +340,38 @@
         const res = await fetch(`/history?request_user=${encodeURIComponent(deviceName)}`);
         if (res.ok) {
           const data = await res.json();
-          const newItems = (data.items || []).reverse();
-          const newPinnedId = data.pinned_id || null;
+          if (!data || !Array.isArray(data.items)) return;
 
+          const newItems = data.items.slice().reverse();
+
+          // Anti-blank protection: never wipe existing chat if server unexpectedly returns empty list!
+          if (newItems.length === 0 && items.length > 0) return;
+
+          const newPinnedId = data.pinned_id || null;
           if (newPinnedId !== currentPinnedId) {
             currentPinnedId = newPinnedId;
             updatePinnedBar();
           }
 
-          // Check if items or their reactions changed
+          // Anti-disappearing protection: keep recent local items not yet confirmed by server
+          const serverIdSet = new Set(newItems.map(x => x.id));
+          const nowSec = Date.now() / 1000;
+          const pendingLocals = items.filter(x => {
+            if (serverIdSet.has(x.id)) return false;
+            const age = nowSec - (x.time_epoch || 0);
+            return (x.id && x.id.startsWith('temp_')) || age < 45;
+          });
+
+          // Merged list
+          const merged = [...newItems, ...pendingLocals];
+          merged.sort((a, b) => (a.time_epoch || 0) - (b.time_epoch || 0));
+
           const prevIds = new Set(items.map(x => x.id));
-          const hasChanges = itemSignature(newItems) !== itemSignature(items);
+          const hasChanges = itemSignature(merged) !== itemSignature(items);
 
           if (hasChanges) {
             const freshArrivals = newItems.filter(x => !prevIds.has(x.id));
-            items = newItems;
+            items = merged;
             renderFeed();
             updatePinnedBar();
             if (freshArrivals.length > 0) {
@@ -420,13 +437,26 @@
     }
   }
 
-  // Fetch History from Server
+  // Fetch History from Server (with anti-blank protection)
   async function fetchHistory() {
     try {
-      const res = await fetch('/history');
+      const res = await fetch(`/history?request_user=${encodeURIComponent(deviceName)}`);
       if (res.ok) {
         const data = await res.json();
-        items = (data.items || []).reverse();
+        if (!data || !Array.isArray(data.items)) return;
+        if (data.items.length === 0 && items.length > 0) return; // Anti-blank
+        
+        const newItems = data.items.slice().reverse();
+        const serverIdSet = new Set(newItems.map(x => x.id));
+        const nowSec = Date.now() / 1000;
+        const pendingLocals = items.filter(x => {
+          if (serverIdSet.has(x.id)) return false;
+          const age = nowSec - (x.time_epoch || 0);
+          return (x.id && x.id.startsWith('temp_')) || age < 45;
+        });
+
+        items = [...newItems, ...pendingLocals];
+        items.sort((a, b) => (a.time_epoch || 0) - (b.time_epoch || 0));
         currentPinnedId = data.pinned_id || null;
         renderFeed();
         updatePinnedBar();
@@ -1140,7 +1170,61 @@
     }
   }
 
-  // Upload Files with Progress
+  // Client-Side Image Auto-Compression Before Upload
+  function compressImageBeforeUpload(file) {
+    return new Promise((resolve) => {
+      if (!file || !file.type || !file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') {
+        return resolve(file);
+      }
+      if (file.size < 500 * 1024) {
+        return resolve(file);
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1600;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          canvas.toBlob(
+            (blob) => {
+              if (blob && blob.size < file.size) {
+                const compressedFile = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), {
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                });
+                resolve(compressedFile);
+              } else {
+                resolve(file);
+              }
+            },
+            'image/jpeg',
+            0.82
+          );
+        };
+        img.onerror = () => resolve(file);
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(file);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Upload Files with Progress & Anti-Disappear Protection
   function uploadFiles(fileList, customCategory = null) {
     if (!fileList || fileList.length === 0) return;
 
@@ -1150,7 +1234,12 @@
       btnViewOnce.classList.remove('active');
     }
 
-    Array.from(fileList).forEach(file => {
+    Array.from(fileList).forEach(async (origFile) => {
+      uploadProgressContainer.classList.remove('hidden');
+      uploadStatusText.textContent = `Optimizing ${origFile.name}...`;
+
+      const file = await compressImageBeforeUpload(origFile);
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('sender', deviceName);
@@ -1162,8 +1251,6 @@
       if (customCategory) formData.append('custom_type', customCategory);
 
       const xhr = new XMLHttpRequest();
-
-      uploadProgressContainer.classList.remove('hidden');
       uploadStatusText.textContent = `Sending ${file.name}...`;
 
       xhr.upload.onprogress = (e) => {
@@ -1180,8 +1267,13 @@
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const data = JSON.parse(xhr.responseText);
-            if (data && data.item && !items.some(x => x.id === data.item.id)) {
-              items.push(data.item);
+            if (data && data.item) {
+              const idx = items.findIndex(x => x.id === data.item.id);
+              if (idx === -1) {
+                items.push(data.item);
+              } else {
+                items[idx] = data.item;
+              }
               renderFeed();
               scrollToBottom();
               saveHistoryToLocalStorage(); // 💾 Save to localStorage!

@@ -48,6 +48,42 @@ last_gist_sync = 0
 online_users = {}  # username -> {"device": device, "last_seen": timestamp}
 
 
+def optimize_image_bytes(data_bytes: bytes, mime_type: str) -> tuple[bytes, str]:
+    """Compress and resize images to prevent Gist bloat and ensure fast loading."""
+    if not (mime_type.startswith("image/") or mime_type in ["application/octet-stream"]):
+        return data_bytes, mime_type
+    try:
+        from PIL import Image, ImageOps
+        import io
+        img = Image.open(io.BytesIO(data_bytes))
+        img = ImageOps.exif_transpose(img)
+        if getattr(img, "is_animated", False) or mime_type in ["image/gif", "image/svg+xml"]:
+            return data_bytes, mime_type
+        
+        max_dim = 1280
+        if img.width > max_dim or img.height > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+        
+        out_buf = io.BytesIO()
+        if img.mode in ("RGBA", "P") and "A" in img.getbands():
+            img.save(out_buf, format="PNG", optimize=True)
+            png_bytes = out_buf.getvalue()
+            if len(png_bytes) > 350 * 1024:
+                rgb_img = Image.new("RGB", img.size, (255, 255, 255))
+                rgb_img.paste(img, mask=img.split()[3])
+                out_buf = io.BytesIO()
+                rgb_img.save(out_buf, format="JPEG", quality=82, optimize=True)
+                return out_buf.getvalue(), "image/jpeg"
+            return png_bytes, "image/png"
+        else:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(out_buf, format="JPEG", quality=82, optimize=True)
+            return out_buf.getvalue(), "image/jpeg"
+    except Exception as e:
+        print("[!] Image optimize error:", e)
+        return data_bytes, mime_type
+
 def fetch_from_gist():
     global history_cache, pinned_item_id
     try:
@@ -59,27 +95,51 @@ def fetch_from_gist():
                 "User-Agent": "AirLink-App"
             }
         )
-        resp = urllib.request.urlopen(req, timeout=5)
+        resp = urllib.request.urlopen(req, timeout=6)
         gist_data = json.loads(resp.read().decode())
-        if "history.json" in gist_data.get("files", {}):
-            raw = gist_data["files"]["history.json"].get("content", "[]")
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                history_cache = parsed.get("items", [])
-                pinned_item_id = parsed.get("pinned_id", None)
-            elif isinstance(parsed, list):
-                history_cache = parsed
+        files = gist_data.get("files", {})
+        if "history.json" in files:
+            file_info = files["history.json"]
+            raw = file_info.get("content", "")
+            if file_info.get("truncated") and file_info.get("raw_url"):
+                try:
+                    raw_req = urllib.request.Request(
+                        file_info["raw_url"],
+                        headers={
+                            "Authorization": f"Bearer {GITHUB_TOKEN}",
+                            "User-Agent": "AirLink-App"
+                        }
+                    )
+                    raw = urllib.request.urlopen(raw_req, timeout=8).read().decode("utf-8")
+                except Exception as e:
+                    print("[!] Raw gist fetch error:", e)
             
-            # Cache to /tmp
-            try:
-                with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-                    json.dump({"items": history_cache, "pinned_id": pinned_item_id}, f, indent=2, ensure_ascii=False)
-            except Exception:
-                pass
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                    new_items = []
+                    new_pinned = None
+                    if isinstance(parsed, dict):
+                        new_items = parsed.get("items", [])
+                        new_pinned = parsed.get("pinned_id", None)
+                    elif isinstance(parsed, list):
+                        new_items = parsed
+                    
+                    # Protect against wiping non-empty cache if parsed is unexpectedly empty
+                    if new_items or not history_cache:
+                        history_cache = new_items
+                        pinned_item_id = new_pinned
+                    
+                    # Cache to /tmp
+                    try:
+                        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                            json.dump({"items": history_cache, "pinned_id": pinned_item_id}, f, indent=2, ensure_ascii=False)
+                    except Exception:
+                        pass
+                except Exception as parse_err:
+                    print("[!] JSON parse error from Gist:", parse_err)
     except Exception as e:
         print("[!] Gist fetch error:", e)
-
-import threading
 
 def _gist_worker(payload):
     try:
@@ -105,10 +165,10 @@ def _gist_worker(payload):
     except Exception as e:
         print("[!] Gist save error:", e)
 
-def save_to_gist():
+def save_to_gist(sync: bool = True):
     global history_cache, pinned_item_id
     payload = {
-        "items": history_cache[:100],
+        "items": history_cache[:60],
         "pinned_id": pinned_item_id,
         "updated_at": time.time()
     }
@@ -118,31 +178,32 @@ def save_to_gist():
     except Exception:
         pass
 
-    t = threading.Thread(target=_gist_worker, args=(payload,), daemon=True)
-    t.start()
+    if sync:
+        _gist_worker(payload)
+    else:
+        import threading
+        t = threading.Thread(target=_gist_worker, args=(payload,), daemon=True)
+        t.start()
 
 def load_data():
     global history_cache, pinned_item_id, last_gist_sync
     now = time.time()
-    if not history_cache or (now - last_gist_sync > 8):
-        # Try local cache first
-        if HISTORY_FILE.exists():
-            try:
-                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, dict):
-                        history_cache = data.get("items", [])
-                        pinned_item_id = data.get("pinned_id", None)
-                    elif isinstance(data, list):
-                        history_cache = data
-            except Exception:
-                pass
+    if not history_cache and HISTORY_FILE.exists():
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    history_cache = data.get("items", [])
+                    pinned_item_id = data.get("pinned_id", None)
+                elif isinstance(data, list):
+                    history_cache = data
+        except Exception:
+            pass
+    
+    if not history_cache or (now - last_gist_sync > 10):
+        fetch_from_gist()
+        last_gist_sync = now
         
-        # Refresh from Gist if cache is empty or stale
-        if not history_cache or (now - last_gist_sync > 30):
-            fetch_from_gist()
-            last_gist_sync = now
-            
     return history_cache
 
 # Initial load
@@ -363,9 +424,22 @@ async def upload_file(
     
     category = custom_type or categorize_file(dest_path.name, mime_type)
     
+    # Compress images to keep base64 tiny, fast, and prevent Gist bloat
+    if category == "image" or mime_type.startswith("image/"):
+        opt_bytes, opt_mime = optimize_image_bytes(content_bytes, mime_type)
+        if len(opt_bytes) < len(content_bytes):
+            content_bytes = opt_bytes
+            file_size = len(content_bytes)
+            mime_type = opt_mime
+            try:
+                with open(dest_path, "wb") as f:
+                    f.write(content_bytes)
+            except Exception:
+                pass
+    
     # Store base64 data url permanently so photos/files NEVER expire across serverless reboots
     data_url = None
-    if file_size < 6 * 1024 * 1024:
+    if file_size < 3 * 1024 * 1024:
         b64 = base64.b64encode(content_bytes).decode("utf-8")
         data_url = f"data:{mime_type};base64,{b64}"
     
@@ -392,7 +466,7 @@ async def upload_file(
     
     load_data()
     history_cache.insert(0, item)
-    save_to_gist()
+    save_to_gist(sync=True)
     return {"success": True, "item": item}
 
 @router.get("/download/{filename}")
