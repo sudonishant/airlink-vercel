@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>AirLink — Private Cloud Chat & File Sync</title>
-  <meta name="description" content="AirLink — apne devices aur doston ke saath private real-time chat, photos, files aur voice notes. Fast, secure, PWA.">
-
+  <title>AirLink - Telegram Style PC & Mobile Sync</title>
+  
   <!-- PWA Meta -->
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#17212b">
@@ -20,7 +19,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/css/style.css?v=2.0.0">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body class="tg-theme">
   
@@ -61,23 +61,28 @@
           <span id="sound-icon">🔔</span>
         </button>
 
+        <!-- Passcode Privacy Lock Button -->
+        <button id="btn-header-lock" class="tg-icon-btn" title="Lock App with Passcode">
+          <span id="header-lock-icon">🔒</span>
+        </button>
+
         <!-- More Menu -->
         <div class="tg-dropdown">
           <button id="btn-more-menu" class="tg-icon-btn" title="More">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="12" cy="19" r="2"></circle></svg>
           </button>
           <div id="more-menu-dropdown" class="tg-dropdown-menu">
+            <button id="btn-menu-privacy" class="tg-menu-item">
+              <span>🛡️</span> Privacy & Passcode Lock
+            </button>
             <button id="btn-open-change-name" class="tg-menu-item">
               <span>✏️</span> Change Name
             </button>
+            <a href="/api/download-all-zip" class="tg-menu-item">
+              <span>📦</span> Download All (ZIP)
+            </a>
             <button id="btn-toggle-autocopy" class="tg-menu-item">
               <span id="autocopy-icon">📋</span> Auto-Copy Incoming Text
-            </button>
-            <button id="btn-show-qr" class="tg-menu-item">
-              <span>📱</span> Show Connect QR
-            </button>
-            <button id="btn-logout" class="tg-menu-item">
-              <span>🚪</span> Logout / Switch User
             </button>
             <button id="btn-clear-history" class="tg-menu-item text-danger">
               <span>🗑️</span> Clear All Messages
@@ -168,7 +173,7 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
         </button>
       </div>
-    </div><!-- /#voice-recording-overlay -->
+    </div>
 
     <!-- Active Private DM Banner -->
     <div id="dm-active-banner" class="tg-dm-banner hidden">
@@ -245,9 +250,13 @@
       </div>
       <div class="tg-modal-body">
         <p class="tg-modal-subtitle">Scan this QR code with your phone camera:</p>
-
+        
         <div class="tg-qr-box">
           <img id="qr-image" src="/api/qr" alt="AirLink QR Code">
+        </div>
+
+        <div class="tg-ip-group">
+          <select id="ip-select" class="tg-select"></select>
         </div>
 
         <div class="tg-copy-group">
@@ -281,27 +290,14 @@
     </div>
   </div>
 
-  <!-- Join Modal (Name + Room Passcode) -->
+  <!-- First-Time Name Setup Modal -->
   <div id="name-modal" class="tg-modal-overlay hidden">
     <div class="tg-dialog-card">
       <div class="tg-dialog-icon">✈️</div>
       <h3 class="tg-dialog-title">Welcome to AirLink</h3>
-      <p class="tg-dialog-desc">Enter your name aur room ka passcode:</p>
-      <input type="text" id="initial-name-input" class="tg-dialog-input" placeholder="Your Name (e.g. Nishant)" maxlength="25" autocomplete="off">
-      <input type="password" id="initial-passcode-input" class="tg-dialog-input" placeholder="Room Passcode" maxlength="64" autocomplete="off">
+      <p class="tg-dialog-desc">Enter your name so others in the chat know who you are:</p>
+      <input type="text" id="initial-name-input" class="tg-dialog-input" placeholder="Your Name (e.g. Nishant)" maxlength="25">
       <button id="btn-save-initial-name" class="tg-btn-primary full-width">Join Chat 🚀</button>
-      <p class="tg-dialog-hint">🔒 Passcode room owner (admin) ke paas hota hai — Vercel ka <code>ROOM_PASSCODE</code> env variable.</p>
-    </div>
-  </div>
-
-  <!-- Backend Setup Required Modal -->
-  <div id="setup-modal" class="tg-modal-overlay hidden">
-    <div class="tg-dialog-card">
-      <div class="tg-dialog-icon">🛠️</div>
-      <h3 class="tg-dialog-title">Setup Baaki Hai</h3>
-      <p class="tg-dialog-desc">Backend ke environment variables set nahi hue hain. Vercel me ye values add karo:</p>
-      <ul id="setup-missing-list" class="tg-setup-list"></ul>
-      <p class="tg-dialog-hint">📦 Poora step-by-step guide repo ke <code>README.md</code> me hai (Supabase Setup section).</p>
     </div>
   </div>
 
@@ -318,6 +314,81 @@
     </div>
   </div>
 
+  <!-- Fullscreen Telegram Style Passcode Lock Screen -->
+  <div id="lock-screen-overlay" class="tg-lock-overlay hidden">
+    <div class="tg-lock-card">
+      <div class="tg-lock-icon-glow">🔒</div>
+      <h3 id="lock-screen-title" class="tg-dialog-title">AirLink Locked</h3>
+      <p id="lock-screen-desc" class="tg-dialog-desc">Enter 4-digit passcode to unlock chat</p>
+      
+      <div class="tg-pin-dots" id="pin-dots">
+        <span class="tg-pin-dot"></span>
+        <span class="tg-pin-dot"></span>
+        <span class="tg-pin-dot"></span>
+        <span class="tg-pin-dot"></span>
+      </div>
+
+      <div class="tg-pin-keypad" id="pin-keypad">
+        <button type="button" class="tg-key-btn" data-key="1">1</button>
+        <button type="button" class="tg-key-btn" data-key="2">2</button>
+        <button type="button" class="tg-key-btn" data-key="3">3</button>
+        <button type="button" class="tg-key-btn" data-key="4">4</button>
+        <button type="button" class="tg-key-btn" data-key="5">5</button>
+        <button type="button" class="tg-key-btn" data-key="6">6</button>
+        <button type="button" class="tg-key-btn" data-key="7">7</button>
+        <button type="button" class="tg-key-btn" data-key="8">8</button>
+        <button type="button" class="tg-key-btn" data-key="9">9</button>
+        <button type="button" class="tg-key-btn key-text" id="btn-key-cancel">Cancel</button>
+        <button type="button" class="tg-key-btn" data-key="0">0</button>
+        <button type="button" class="tg-key-btn key-text" id="btn-key-backspace">⌫</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Privacy & Security Settings Modal -->
+  <div id="privacy-settings-modal" class="tg-modal-overlay hidden">
+    <div class="tg-dialog-card">
+      <h3 class="tg-dialog-title">🛡️ Privacy & Passcode Lock</h3>
+      <p class="tg-dialog-desc">Protect your messages and attachments from prying eyes.</p>
+      
+      <div class="tg-privacy-options">
+        <div class="tg-privacy-row">
+          <div class="tg-privacy-info">
+            <div class="tg-privacy-title">4-Digit Passcode Lock</div>
+            <div class="tg-subtext" id="passcode-status-label">No passcode set</div>
+          </div>
+          <button id="btn-manage-passcode" class="tg-btn-sm tg-btn-primary">Set PIN</button>
+        </div>
+
+        <div class="tg-privacy-row">
+          <div class="tg-privacy-info">
+            <div class="tg-privacy-title">Auto-Lock on Tab Switch</div>
+            <div class="tg-subtext">Locks instantly when switching apps or tabs</div>
+          </div>
+          <label class="tg-toggle-switch">
+            <input type="checkbox" id="chk-autolock">
+            <span class="tg-toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="tg-privacy-row">
+          <div class="tg-privacy-info">
+            <div class="tg-privacy-title">Incognito / Ghost Mode</div>
+            <div class="tg-subtext">Do not cache chat history in localStorage</div>
+          </div>
+          <label class="tg-toggle-switch">
+            <input type="checkbox" id="chk-incognito">
+            <span class="tg-toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="tg-dialog-actions" style="margin-top: 18px;">
+        <button id="btn-close-privacy" class="tg-btn-primary full-width">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Reaction Animated Particles Container -->
   <div id="reaction-particles-container" class="tg-reaction-particles-container"></div>
 
@@ -325,6 +396,6 @@
   <div id="toast-container" class="tg-toast-container"></div>
 
   <!-- Script -->
-  <script src="/js/app.js?v=2.0.0"></script>
+  <script src="/js/app.js"></script>
 </body>
 </html>

@@ -1611,44 +1611,214 @@ body.tg-theme {
   margin-top: 2px;
 }
 
+/* ==========================================================
+   🔒 Passcode Privacy Lock Screen & Keypad
+   ========================================================== */
+.tg-lock-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 22, 33, 0.98);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: tgFadeIn 0.25s ease;
+}
 
-/* ============================================================
-   v2.0.0 additions — join passcode, setup modal, misc polish
-   ============================================================ */
-.tg-dialog-hint {
-  margin-top: 10px;
-  font-size: 0.75rem;
-  line-height: 1.5;
-  color: var(--tg-text-secondary);
+.tg-lock-card {
+  width: 100%;
+  max-width: 340px;
   text-align: center;
-}
-
-.tg-dialog-hint code {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
-  background: rgba(255, 255, 255, 0.07);
-  padding: 1px 5px;
-  border-radius: 4px;
-  color: var(--tg-accent-cyan, #4dd0e1);
-}
-
-.tg-setup-list {
-  list-style: none;
-  margin: 12px 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: center;
 }
 
-.tg-setup-list li {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  background: rgba(255, 87, 34, 0.12);
-  border: 1px solid rgba(255, 87, 34, 0.35);
-  color: #ffb4a2;
-  padding: 8px 12px;
-  border-radius: 8px;
-  text-align: left;
-  word-break: break-all;
+.tg-lock-icon-glow {
+  font-size: 2.8rem;
+  margin-bottom: 12px;
+  animation: pulseGlow 2.5s infinite ease-in-out;
 }
+
+@keyframes pulseGlow {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(41, 144, 236, 0.4)); }
+  50% { transform: scale(1.08); filter: drop-shadow(0 0 22px rgba(41, 144, 236, 0.9)); }
+}
+
+.tg-pin-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 22px 0 30px;
+}
+
+.tg-pin-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--tg-accent-blue);
+  background: transparent;
+  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.tg-pin-dot.filled {
+  background: var(--tg-accent-blue);
+  box-shadow: 0 0 12px var(--tg-accent-blue);
+  transform: scale(1.2);
+}
+
+.tg-pin-dots.error {
+  animation: shake 0.4s ease;
+}
+
+.tg-pin-dots.error .tg-pin-dot {
+  border-color: #ff5252;
+  background: #ff5252;
+  box-shadow: 0 0 12px #ff5252;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-12px); }
+  40%, 80% { transform: translateX(12px); }
+}
+
+.tg-pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px 20px;
+  width: 100%;
+  max-width: 280px;
+}
+
+.tg-key-btn {
+  width: 68px;
+  height: 68px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--tg-text-primary);
+  font-size: 1.5rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tg-key-btn:active {
+  background: rgba(41, 144, 236, 0.35);
+  border-color: var(--tg-accent-blue);
+  transform: scale(0.92);
+}
+
+.tg-key-btn.key-text {
+  font-size: 0.95rem;
+  background: transparent;
+  border-color: transparent;
+  color: var(--tg-text-secondary);
+}
+
+.tg-key-btn.key-text:active {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tg-text-primary);
+}
+
+/* ==========================================================
+   🛡️ Privacy Settings Options & Toggle Switch
+   ========================================================== */
+.tg-privacy-options {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+  margin-top: 14px;
+}
+
+.tg-privacy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  gap: 12px;
+}
+
+.tg-privacy-info {
+  flex: 1;
+}
+
+.tg-privacy-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--tg-text-primary);
+}
+
+.tg-subtext {
+  font-size: 0.72rem;
+  color: var(--tg-text-secondary);
+  margin-top: 2px;
+}
+
+.tg-btn-sm {
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+/* Toggle Switch */
+.tg-toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.tg-toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.tg-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 24px;
+  transition: 0.25s;
+}
+
+.tg-toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  border-radius: 50%;
+  transition: 0.25s;
+}
+
+.tg-toggle-switch input:checked + .tg-toggle-slider {
+  background-color: var(--tg-accent-blue);
+}
+
+.tg-toggle-switch input:checked + .tg-toggle-slider:before {
+  transform: translateX(20px);
+}
+
+

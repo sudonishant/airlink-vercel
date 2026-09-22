@@ -1,9 +1,4 @@
 {
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 30
-    }
-  },
   "rewrites": [
     {
       "source": "/api/:path*",
@@ -11,7 +6,7 @@
     },
     {
       "source": "/files/:path*",
-      "destination": "/:path*"
+      "destination": "/download/:path*"
     },
     {
       "source": "/static/:path*",

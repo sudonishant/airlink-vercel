@@ -1,19 +1,19 @@
 {
-  "name": "AirLink — Private Cloud Chat & File Sync",
+  "name": "AirLink - Mobile to Kali Linux",
   "short_name": "AirLink",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0e17",
-  "theme_color": "#17212b",
-  "description": "Apne devices aur doston ke saath private real-time chat, photos, files aur voice notes — anywhere, anytime.",
+  "theme_color": "#00ffcc",
+  "description": "Instant realtime transfer & sync between Mobile and Kali Linux PC",
   "icons": [
     {
-      "src": "/icons/icon-192.png",
+      "src": "/static/icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/icons/icon-512.png",
+      "src": "/static/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
     }

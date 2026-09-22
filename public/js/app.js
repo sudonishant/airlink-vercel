@@ -21,152 +21,21 @@
   let networkInfo = null;
 
   // New Feature States
-  let currentUserName = storage.getItem('airlink_user_name') || '';
+  let currentUserName = localStorage.getItem('airlink_user_name') || '';
   let isViewOnceActive = false;
   let currentPinnedId = null;
   let onlineUsers = [];
   let activeDmUser = null; // null = General Public Chat; string = target username
-  const POPULAR_EMOJIS = ['❤️', '👍', '😂', '🔥', '😮', '😢', '🎉', '🚀', '🙏', '😍', '🤔', '👏'];
-  let maxFileMB = 4;            // server /info se update hota hai
-  let lastSince = '1970-01-01T00:00:00Z';
-  let joinedAtEpoch = 0;        // notification sirf naye messages ke liye
+  const POPULAR_EMOJIS = ['❤️', '👍', '😂', '🔥', '😮', '😢', '🎉', '🚀'];
 
-  // ==========================================================
-  // 🔐 Auth & API layer (v2.0 — room passcode + session token)
-  // ==========================================================
-  const Session = {
-    get token() { return storage.getItem('airlink_token') || ''; },
-    set token(v) {
-      if (v) storage.setItem('airlink_token', v);
-      else storage.removeItem('airlink_token');
-    }
-  };
-
-  function hasValidSession() {
-    return Boolean(Session.token && storage.getItem('airlink_user_name'));
-  }
-
-  async function apiFetch(path, opts = {}) {
-    opts.headers = Object.assign({}, opts.headers || {});
-    if (Session.token) opts.headers['Authorization'] = 'Bearer ' + Session.token;
-    const res = await fetch(path, opts);
-    if (res.status === 401) {
-      // session expired — rejoin chahiye
-      if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-      showJoinModal(true);
-      throw new Error('unauthorized');
-    }
-    if (res.status === 503) {
-      let missing = [];
-      try { const d = await res.json(); missing = (d.detail && d.detail.missing) || []; } catch (e) {}
-      showSetupModal(missing);
-      throw new Error('setup required');
-    }
-    return res;
-  }
-
-  // Media tags (<img>/<audio>/<video>) headers nahi bhej sakte → token query me
-  function mediaSrc(item, download) {
-    const base = download
-      ? (item.download_url || ('/download/' + item.id + '?dl=1'))
-      : (item.view_url || ('/download/' + item.id));
-    if (!base) return '';
-    return base + (base.indexOf('?') !== -1 ? '&' : '?') + 'token=' + encodeURIComponent(Session.token);
-  }
-
-  function showSetupModal(missing) {
-    if (!setupModal || !setupMissingList) return;
-    setupMissingList.innerHTML = '';
-    (missing.length ? missing : ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'ROOM_PASSCODE']).forEach(k => {
-      const li = document.createElement('li');
-      li.textContent = k;
-      setupMissingList.appendChild(li);
-    });
-    setupModal.classList.remove('hidden');
-  }
-
-  function showJoinModal(expired) {
-    if (!nameModal) return;
-    if (initialNameInput && !initialNameInput.value) {
-      initialNameInput.value = currentUserName || '';
-    }
-    nameModal.classList.remove('hidden');
-    setTimeout(() => {
-      if (expired && initialPasscodeInput) initialPasscodeInput.focus();
-      else if (initialNameInput && !initialNameInput.value) initialNameInput.focus();
-      else if (initialPasscodeInput) initialPasscodeInput.focus();
-    }, 250);
-  }
-
-  async function joinRoom() {
-    const name = initialNameInput.value.trim();
-    const passcode = initialPasscodeInput ? initialPasscodeInput.value : '';
-    if (!name) { showToast('Please enter your name', 'error'); initialNameInput.focus(); return; }
-    if (!passcode) { showToast('Room passcode daalo', 'error'); if (initialPasscodeInput) initialPasscodeInput.focus(); return; }
-    try {
-      const res = await fetch('/auth/join', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name, passcode: passcode })
-      });
-      if (res.status === 401) { showToast('Galat room passcode 🔑', 'error'); return; }
-      if (res.status === 429) { showToast('Bahut attempts — thoda ruk kar try karo', 'error'); return; }
-      if (!res.ok) {
-        let msg = 'Join failed';
-        try { const d = await res.json(); msg = d.detail || msg; } catch (e) {}
-        showToast(String(msg), 'error');
-        return;
-      }
-      const data = await res.json();
-      Session.token = data.token;
-      storage.setItem('airlink_user_name', data.name);
-      currentUserName = data.name;
-      deviceName = data.name;
-      joinedAtEpoch = Date.now() / 1000;
-      if (currentDeviceTag) currentDeviceTag.textContent = data.name;
-      if (initialPasscodeInput) initialPasscodeInput.value = '';
-      nameModal.classList.add('hidden');
-      setupModal.classList.add('hidden');
-      showToast(`Welcome, ${data.name}! ✈️`, 'success');
-      startApp();
-    } catch (err) {
-      showToast('Network error — dobara try karo', 'error');
-    }
-  }
-
-  function logout() {
-    Session.token = '';
-    storage.removeItem('airlink_user_name');
-    storage.removeItem(CACHE_KEY);
-    storage.removeItem(PINNED_CACHE_KEY);
-    currentUserName = '';
-    items = [];
-    renderFeed();
-    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-    showJoinModal(false);
-  }
-
-
-  // ==========================================================
-  // 💾 Safe storage (private browsing / sandboxed iframe safe)
-  // ==========================================================
-  const storage = (() => {
-    try {
-      const t = window.localStorage;
-      t.setItem('__airlink_test', '1');
-      t.removeItem('__airlink_test');
-      return t;
-    } catch (e) {
-      // localStorage block hai (sandboxed iframe / private mode) — memory fallback
-      const mem = {};
-      return {
-        getItem: (k) => (k in mem ? mem[k] : null),
-        setItem: (k, v) => { mem[k] = String(v); },
-        removeItem: (k) => { delete mem[k]; }
-      };
-    }
-  })();
+  // 🛡️ Privacy & Passcode States
+  let currentPasscode = localStorage.getItem('airlink_passcode') || '';
+  let isAutoLockEnabled = localStorage.getItem('airlink_autolock') === 'true';
+  let isIncognitoMode = localStorage.getItem('airlink_incognito') === 'true';
+  let enteredPin = '';
+  let isPasscodeSetupMode = false;
+  let passcodeStep = 1; // 1 = enter new, 2 = confirm
+  let candidatePin = '';
 
   // Detect Device Platform
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -208,6 +77,7 @@
   const qrModal = document.getElementById('qr-modal');
   const btnCloseQrModal = document.getElementById('btn-close-qr-modal');
   const qrImage = document.getElementById('qr-image');
+  const ipSelect = document.getElementById('ip-select');
   const directUrlInput = document.getElementById('direct-url-input');
   const btnCopyUrl = document.getElementById('btn-copy-url');
 
@@ -215,8 +85,10 @@
   const moreMenuDropdown = document.getElementById('more-menu-dropdown');
   const btnClearHistory = document.getElementById('btn-clear-history');
   const btnOpenChangeName = document.getElementById('btn-open-change-name');
-  const btnLogout = document.getElementById('btn-logout');
-  const btnShowQrMenu = document.getElementById('btn-show-qr');
+
+  const btnHeaderLock = document.getElementById('btn-header-lock');
+  const headerLockIcon = document.getElementById('header-lock-icon');
+  const btnMenuPrivacy = document.getElementById('btn-menu-privacy');
 
   const pinnedBar = document.getElementById('pinned-bar');
   const pinnedText = document.getElementById('pinned-text');
@@ -229,13 +101,24 @@
   const btnExitDm = document.getElementById('btn-exit-dm');
   const reactionParticlesContainer = document.getElementById('reaction-particles-container');
 
+  const lockScreenOverlay = document.getElementById('lock-screen-overlay');
+  const lockScreenTitle = document.getElementById('lock-screen-title');
+  const lockScreenDesc = document.getElementById('lock-screen-desc');
+  const pinDots = document.getElementById('pin-dots');
+  const pinKeypad = document.getElementById('pin-keypad');
+  const btnKeyCancel = document.getElementById('btn-key-cancel');
+  const btnKeyBackspace = document.getElementById('btn-key-backspace');
+
+  const privacySettingsModal = document.getElementById('privacy-settings-modal');
+  const passcodeStatusLabel = document.getElementById('passcode-status-label');
+  const btnManagePasscode = document.getElementById('btn-manage-passcode');
+  const chkAutolock = document.getElementById('chk-autolock');
+  const chkIncognito = document.getElementById('chk-incognito');
+  const btnClosePrivacy = document.getElementById('btn-close-privacy');
+
   const nameModal = document.getElementById('name-modal');
   const initialNameInput = document.getElementById('initial-name-input');
-  const initialPasscodeInput = document.getElementById('initial-passcode-input');
   const btnSaveInitialName = document.getElementById('btn-save-initial-name');
-
-  const setupModal = document.getElementById('setup-modal');
-  const setupMissingList = document.getElementById('setup-missing-list');
 
   const changeNameModal = document.getElementById('change-name-modal');
   const newNameInput = document.getElementById('new-name-input');
@@ -268,33 +151,22 @@
 
   // Initialize
   function init() {
+    checkNameOnboarding();
     loadLocalSettings();
+    initPrivacySuite(); // 🛡️ Initialize Passcode Lock & Privacy
     loadCachedHistory(); // ⚡ Instant 0ms offline-first loading from localStorage!
-    setupEventListeners();
-    registerServiceWorker();
-
-    if (hasValidSession()) {
-      deviceName = currentUserName;
-      if (currentDeviceTag) currentDeviceTag.textContent = currentUserName;
-      startApp();
-    } else {
-      showJoinModal(false);
-    }
-  }
-
-  // App start after successful auth
-  function startApp() {
-    joinedAtEpoch = Date.now() / 1000 - 3; // join ke turant baad ke messages hi notify karo
-    startPolling();     // ⚡ 2s incremental sync (server race-free)
+    initWebSocket();
     fetchHistory();
     fetchSystemInfo();
-    startHeartbeat();   // 🟢 Live presence tracking (DB-backed)
+    startHeartbeat(); // 🟢 Start live presence tracking
+    setupEventListeners();
+    registerServiceWorker();
   }
 
   // Load History from localStorage
   function loadCachedHistory() {
     try {
-      const cached = storage.getItem(CACHE_KEY);
+      const cached = localStorage.getItem(CACHE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -303,7 +175,7 @@
           scrollToBottom();
         }
       }
-      const cachedPin = storage.getItem(PINNED_CACHE_KEY);
+      const cachedPin = localStorage.getItem(PINNED_CACHE_KEY);
       if (cachedPin) {
         currentPinnedId = cachedPin;
         updatePinnedBar();
@@ -313,35 +185,46 @@
 
   // Save History to localStorage
   function saveHistoryToLocalStorage() {
+    if (isIncognitoMode) return; // 🛡️ Ghost / Incognito Mode: zero trace in localStorage!
     try {
       const toCache = items.slice(-80).map(item => {
-        if (item.is_view_once && (item.is_consumed || storage.getItem('vo_opened_' + item.id) === 'true')) {
+        if (item.is_view_once && (item.is_consumed || localStorage.getItem('vo_opened_' + item.id) === 'true')) {
           return { ...item, view_url: '', content: '🔂 View Once (Opened)', is_consumed: true };
         }
         return item;
       });
-      storage.setItem(CACHE_KEY, JSON.stringify(toCache));
+      localStorage.setItem(CACHE_KEY, JSON.stringify(toCache));
       if (currentPinnedId) {
-        storage.setItem(PINNED_CACHE_KEY, currentPinnedId);
+        localStorage.setItem(PINNED_CACHE_KEY, currentPinnedId);
       } else {
-        storage.removeItem(PINNED_CACHE_KEY);
+        localStorage.removeItem(PINNED_CACHE_KEY);
       }
     } catch (e) {
       try {
         const stripped = items.slice(-25).map(x => ({ ...x, view_url: (x.category === 'image' && x.view_url && x.view_url.length > 50000) ? '' : x.view_url }));
-        storage.setItem(CACHE_KEY, JSON.stringify(stripped));
+        localStorage.setItem(CACHE_KEY, JSON.stringify(stripped));
       } catch (err) {}
     }
   }
 
-  // (v2.0) Name onboarding ab join modal (naam + passcode) ke through hota hai — checkNameOnboarding hata diya gaya
+  // Name Onboarding Check
+  function checkNameOnboarding() {
+    currentUserName = localStorage.getItem('airlink_user_name') || '';
+    if (!currentUserName) {
+      nameModal.classList.remove('hidden');
+      setTimeout(() => initialNameInput && initialNameInput.focus(), 250);
+    } else {
+      deviceName = currentUserName;
+      currentDeviceTag.textContent = currentUserName;
+    }
+  }
 
   function loadLocalSettings() {
-    const savedSound = storage.getItem('airlink_sound');
+    const savedSound = localStorage.getItem('airlink_sound');
     if (savedSound !== null) isSoundEnabled = savedSound === 'true';
     soundIcon.textContent = isSoundEnabled ? '🔔' : '🔕';
 
-    const savedAutoCopy = storage.getItem('airlink_autocopy');
+    const savedAutoCopy = localStorage.getItem('airlink_autocopy');
     if (savedAutoCopy !== null) isAutoCopyEnabled = savedAutoCopy === 'true';
     autoCopyIcon.textContent = isAutoCopyEnabled ? '📋' : '📑';
   }
@@ -386,10 +269,58 @@
     }, 2800);
   }
 
-  // ==========================================================
-  // 🔄 Incremental Sync Polling (v2.0 — DB-backed, race-free)
-  // ==========================================================
+  // WebSocket & Smart Polling Connection (for Vercel Cloud Serverless)
   let pollInterval = null;
+
+  function initWebSocket() {
+    const isVercel = window.location.hostname.includes('vercel.app');
+    
+    if (isVercel) {
+      tgStatusText.textContent = 'online (cloud)';
+      tgStatusText.style.color = 'var(--tg-accent-cyan)';
+      startPolling();
+      return;
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+    try {
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        tgStatusText.textContent = 'online';
+        tgStatusText.style.color = 'var(--tg-accent-cyan)';
+        reconnectInterval = 1000;
+        if (pollInterval) clearInterval(pollInterval);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleWebSocketMessage(data);
+        } catch (err) {
+          console.error('Error parsing WS message:', err);
+        }
+      };
+
+      ws.onclose = () => {
+        tgStatusText.textContent = 'connecting...';
+        tgStatusText.style.color = 'var(--tg-text-secondary)';
+        startPolling();
+        setTimeout(initWebSocket, reconnectInterval);
+        reconnectInterval = Math.min(reconnectInterval * 1.5, 10000);
+      };
+
+      ws.onerror = () => {
+        startPolling();
+        ws.close();
+      };
+    } catch (e) {
+      startPolling();
+    }
+  }
+
   let unreadCount = 0;
   const originalDocumentTitle = document.title;
 
@@ -398,91 +329,112 @@
     document.title = originalDocumentTitle;
   });
 
-  function startPolling() {
-    if (pollInterval) return;
-    pollInterval = setInterval(pollSync, 2000);
-    pollSync(); // turant pehla sync
+  function itemSignature(arr) {
+    return arr.map(x => `${x.id}_${x.is_consumed ? 'c' : ''}_${JSON.stringify(x.reactions || {})}`).join('|');
   }
 
-  async function pollSync() {
-    try {
-      const res = await apiFetch(`/sync/pending?since=${encodeURIComponent(lastSince)}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.sync_time) lastSince = data.sync_time;
+  function startPolling() {
+    if (pollInterval) return;
+    pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/history?request_user=${encodeURIComponent(deviceName)}`);
+        if (res.ok) {
+          const data = await res.json();
+          const newItems = (data.items || []).reverse();
+          const newPinnedId = data.pinned_id || null;
 
-      let changed = false;
-      const prevIds = new Set(items.map(x => x.id));
-      const freshFromOthers = [];
-
-      // 🗑️ deletions propagate hote hain (soft-delete IDs)
-      if (Array.isArray(data.deleted) && data.deleted.length > 0) {
-        const gone = new Set(data.deleted);
-        items = items.filter(x => !gone.has(x.id));
-        changed = true;
-      }
-
-      // ➕ inserts + updates (idempotent merge by id)
-      (data.items || []).forEach(it => {
-        if (!it || !it.id) return;
-        const idx = items.findIndex(x => x.id === it.id);
-        if (idx === -1) {
-          items.push(it);
-          if (it.sender !== deviceName && it.type !== 'system' &&
-              (it.time_epoch || 0) > joinedAtEpoch) {
-            freshFromOthers.push(it);
+          if (newPinnedId !== currentPinnedId) {
+            currentPinnedId = newPinnedId;
+            updatePinnedBar();
           }
-        } else {
-          items[idx] = it;
+
+          // Check if items or their reactions changed
+          const prevIds = new Set(items.map(x => x.id));
+          const hasChanges = itemSignature(newItems) !== itemSignature(items);
+
+          if (hasChanges) {
+            const freshArrivals = newItems.filter(x => !prevIds.has(x.id));
+            items = newItems;
+            renderFeed();
+            updatePinnedBar();
+            if (freshArrivals.length > 0) {
+              scrollToBottom(); // Auto-scroll when new items arrive
+            }
+            saveHistoryToLocalStorage(); // 💾 Save to localStorage!
+
+            // Alert user for newly arrived items from other devices
+            freshArrivals.forEach(newItem => {
+              if (newItem.sender !== deviceName && newItem.type !== 'system') {
+                playNotificationSound();
+                showToast(`New ${newItem.category} from ${newItem.sender} 🚀`, 'success');
+
+                if (!document.hasFocus()) {
+                  unreadCount++;
+                  document.title = `(${unreadCount}) 💬 New Message - AirLink`;
+                }
+
+                if (newItem.type === 'text' && isAutoCopyEnabled && !newItem.is_view_once) {
+                  navigator.clipboard.writeText(newItem.content).catch(() => {});
+                }
+              }
+            });
+          }
         }
-        changed = true;
-      });
+      } catch (e) {}
+    }, 1000); // ⚡ Fast 1-second auto-refresh!
+  }
 
-      if (data.pinned_id !== currentPinnedId) {
-        currentPinnedId = data.pinned_id || null;
-        changed = true;
-      }
-
-      if (changed) {
-        items.sort((a, b) => (a.time_epoch || 0) - (b.time_epoch || 0));
+  function handleWebSocketMessage(data) {
+    if (data.type === 'new_item') {
+      const item = data.item;
+      if (!items.some(x => x.id === item.id)) {
+        items.push(item);
         renderFeed();
-        updatePinnedBar();
+        scrollToBottom();
+        playNotificationSound();
         saveHistoryToLocalStorage();
-        if (freshFromOthers.length > 0) scrollToBottom();
-
-        freshFromOthers.forEach(newItem => {
-          playNotificationSound();
-          showToast(`New ${newItem.category} from ${newItem.sender} 🚀`, 'success');
-
-          if (!document.hasFocus()) {
-            unreadCount++;
-            document.title = `(${unreadCount}) 💬 New Message - AirLink`;
-          }
-
-          if (newItem.type === 'text' && isAutoCopyEnabled && !newItem.is_view_once && newItem.content) {
-            navigator.clipboard.writeText(newItem.content).catch(() => {});
-          }
-        });
       }
-    } catch (e) { /* 401/503 apiFetch khud handle karta hai */ }
+
+      if (item.sender !== deviceName) {
+        showToast(`New ${item.category} from ${item.sender}`, 'success');
+
+        if (item.type === 'text' && isAutoCopyEnabled && !item.is_view_once) {
+          navigator.clipboard.writeText(item.content).catch(() => {});
+        }
+      }
+    } else if (data.type === 'item_deleted') {
+      items = items.filter(x => x.id !== data.id);
+      if (currentPinnedId === data.id) {
+        currentPinnedId = null;
+        updatePinnedBar();
+      }
+      renderFeed();
+      saveHistoryToLocalStorage();
+    } else if (data.type === 'history_cleared') {
+      items = [];
+      currentPinnedId = null;
+      updatePinnedBar();
+      renderFeed();
+      localStorage.removeItem(CACHE_KEY);
+      localStorage.removeItem(PINNED_CACHE_KEY);
+    }
   }
 
   // Fetch History from Server
   async function fetchHistory() {
     try {
-      const res = await apiFetch('/history');
+      const res = await fetch('/history');
       if (res.ok) {
         const data = await res.json();
         items = (data.items || []).reverse();
         currentPinnedId = data.pinned_id || null;
-        if (data.sync_time) lastSince = data.sync_time;
         renderFeed();
         updatePinnedBar();
         scrollToBottom();
         saveHistoryToLocalStorage(); // 💾 Save to localStorage!
       }
     } catch (err) {
-      // 401/503 apiFetch me handle ho chuka hoga
+      console.warn('Could not fetch history:', err);
     }
   }
 
@@ -491,11 +443,9 @@
       const res = await fetch('/info');
       if (res.ok) {
         networkInfo = await res.json();
-        if (networkInfo.max_file_mb) maxFileMB = networkInfo.max_file_mb;
-        if (networkInfo.status === 'setup_required') {
-          showSetupModal(networkInfo.missing || []);
-        } else if (networkInfo.status === 'database_error') {
-          showToast('Database setup incomplete — README dekho', 'error');
+        if (networkInfo.pinned_id) {
+          currentPinnedId = networkInfo.pinned_id;
+          updatePinnedBar();
         }
         populateNetworkIPs();
       }
@@ -505,15 +455,48 @@
   }
 
   function populateNetworkIPs() {
-    // v2.0: cloud-only app — QR modal me current URL + backend-generated QR dikhta hai
-    if (directUrlInput) directUrlInput.value = window.location.origin;
-    if (qrImage && qrModal && !qrModal.classList.contains('hidden')) {
-      qrImage.src = '/api/qr?t=' + Date.now();
+    if (!networkInfo || !ipSelect) return;
+    ipSelect.innerHTML = '';
+
+    const port = networkInfo.port || 5000;
+
+    if (networkInfo.global_url) {
+      const globOpt = document.createElement('option');
+      globOpt.value = networkInfo.global_url;
+      globOpt.textContent = `🌐 Anywhere / Internet: ${networkInfo.global_url}`;
+      ipSelect.appendChild(globOpt);
     }
+
+    if (networkInfo.hostname) {
+      const hostOpt = document.createElement('option');
+      hostOpt.value = `http://${networkInfo.hostname}.local:${port}`;
+      hostOpt.textContent = `⭐ Local Wi-Fi: ${networkInfo.hostname}.local`;
+      ipSelect.appendChild(hostOpt);
+    }
+    
+    if (networkInfo.ips) {
+      networkInfo.ips.forEach(iface => {
+        const opt = document.createElement('option');
+        opt.value = `http://${iface.ip}:${port}`;
+        opt.textContent = `👉 Wi-Fi IP: ${iface.ip} (${iface.interface})`;
+        ipSelect.appendChild(opt);
+      });
+    }
+
+    updateSelectedIP();
   }
 
   function updateSelectedIP() {
-    populateNetworkIPs();
+    if (!ipSelect || !directUrlInput || !qrImage) return;
+    const selectedUrl = ipSelect.value || window.location.origin;
+    directUrlInput.value = selectedUrl;
+    
+    const isGlobal = selectedUrl.startsWith('https://') && !selectedUrl.includes('.local');
+    if (isGlobal) {
+      qrImage.src = `/api/qr?global_link=true&t=${Date.now()}`;
+    } else {
+      qrImage.src = `/api/qr?ip=${encodeURIComponent(ipSelect.value || window.location.hostname)}&port=${networkInfo ? networkInfo.port : 5000}&t=${Date.now()}`;
+    }
   }
 
   function scrollToBottom() {
@@ -757,10 +740,10 @@
       } else if (item.category === 'image') {
         const mediaWrap = document.createElement('div');
         mediaWrap.className = 'tg-media-image';
-        mediaWrap.onclick = () => openLightbox(mediaSrc(item), item.filename, mediaSrc(item, true));
+        mediaWrap.onclick = () => openLightbox(item.view_url, item.filename, item.download_url);
 
         const img = document.createElement('img');
-        img.src = mediaSrc(item);
+        img.src = item.view_url;
         img.alt = item.filename;
         img.loading = 'lazy';
         mediaWrap.appendChild(img);
@@ -770,14 +753,14 @@
         audioWrap.className = 'tg-audio-bubble';
         audioWrap.innerHTML = `
           <div style="font-size: 0.8rem; color: var(--tg-text-secondary); margin-bottom: 2px;">🎙️ ${escapeHtml(item.filename)} (${item.formatted_size})</div>
-          <audio controls preload="metadata" src="${mediaSrc(item)}"></audio>
+          <audio controls preload="metadata" src="${item.view_url}"></audio>
         `;
         bubble.appendChild(audioWrap);
       } else if (item.category === 'video') {
         const videoWrap = document.createElement('div');
         videoWrap.className = 'tg-video-bubble';
         videoWrap.innerHTML = `
-          <video controls preload="metadata" src="${mediaSrc(item)}"></video>
+          <video controls preload="metadata" src="${item.view_url}"></video>
           <div style="font-size: 0.75rem; color: var(--tg-text-secondary); margin-top: 4px;">${escapeHtml(item.filename)} (${item.formatted_size})</div>
         `;
         bubble.appendChild(videoWrap);
@@ -789,7 +772,7 @@
 
         const fileCard = document.createElement('a');
         fileCard.className = 'tg-file-card tg-bubble-file';
-        fileCard.href = mediaSrc(item, true);
+        fileCard.href = item.download_url;
         fileCard.download = item.filename || 'file';
         fileCard.target = '_blank';
         fileCard.innerHTML = `
@@ -972,74 +955,49 @@
     });
   }
 
-  // Handle View Once Item Click — SERVER-enforced one-time reveal (v2.0)
-  async function handleViewOnceClick(item) {
-    const isAlreadyOpened = item.is_consumed || storage.getItem('vo_opened_' + item.id) === 'true';
-    if (isAlreadyOpened && item.sender !== deviceName) {
+  // Handle View Once Item Click (STRICT 1-TIME VIEW ONLY)
+  function handleViewOnceClick(item) {
+    const isAlreadyOpened = item.is_consumed || localStorage.getItem('vo_opened_' + item.id) === 'true';
+    if (isAlreadyOpened) {
       showToast('This message has already been opened! 🔂', 'info');
       return;
     }
 
-    let data = null;
-    try {
-      const res = await apiFetch(`/view_once/reveal/${item.id}`, { method: 'POST' });
-      if (res.status === 410) {
-        markViewOnceConsumed(item.id);
-        storage.setItem('vo_opened_' + item.id, 'true');
-        showToast('Ye message pehle hi open ho chuka hai 🔂', 'info');
-        return;
-      }
-      if (!res.ok) {
-        showToast('Could not open message', 'error');
-        return;
-      }
-      data = await res.json();
-    } catch (e) {
-      return; // 401/503 already handled
+    // Immediately mark consumed in localStorage and in-memory
+    item.is_consumed = true;
+    localStorage.setItem('vo_opened_' + item.id, 'true');
+
+    if (item.category === 'image' && item.view_url) {
+      const photoUrl = item.view_url;
+      item.view_url = ''; // Erase immediately so it can never be retrieved
+      lightboxDownload.style.display = 'none';
+      openLightbox(photoUrl, '🔂 View Once Photo (Disappears on close)');
+    } else {
+      const textVal = item.content;
+      item.content = '🔂 View Once Message (Opened)';
+      alert(`🔂 View Once Message:\n\n${textVal}`);
+      renderFeed();
     }
 
-    if (item.sender !== deviceName) {
-      markViewOnceConsumed(item.id);
-      storage.setItem('vo_opened_' + item.id, 'true');
-    }
-
-    if (item.type === 'file' && data.signed_url) {
-      if (item.category === 'image') {
-        lightboxDownload.style.display = 'none';
-        openLightbox(data.signed_url, '🔂 View Once Photo (Disappears on close)');
-      } else {
-        const w = window.open(data.signed_url, '_blank');
-        if (!w) showToast('Popup blocked — file dekhne ke liye popup allow karo', 'info');
-      }
-    } else if (data.content) {
-      alert(`🔂 View Once Message:\n\n${data.content}`);
-    }
-    renderFeed();
+    // Inform server to burn this message permanently
+    consumeViewOnce(item.id);
   }
 
-  function markViewOnceConsumed(itemId) {
-    const local = items.find(x => x.id === itemId);
-    if (local) {
-      local.is_consumed = true;
-      local.view_url = '';
-      local.download_url = '';
-      local.content = null;
-    }
-    const row = feedList.querySelector(`.tg-msg-row[data-id="${itemId}"]`);
-    if (row) {
-      const voCard = row.querySelector('.tg-view-once-card');
-      if (voCard && !voCard.classList.contains('consumed')) {
-        voCard.classList.add('consumed');
-        voCard.innerHTML = `
-          <div class="tg-vo-icon">1️⃣</div>
-          <div class="tg-vo-info">
-            <div class="tg-vo-title">View Once Message</div>
-            <div class="tg-vo-desc">Opened / Expired</div>
-          </div>
-        `;
+  async function consumeViewOnce(itemId) {
+    try {
+      await fetch('/view_once/consume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: itemId })
+      });
+      const local = items.find(x => x.id === itemId);
+      if (local) {
+        local.is_consumed = true;
+        local.view_url = '';
+        local.content = '🔂 View Once (Opened)';
+        renderFeed();
       }
-    }
-    saveHistoryToLocalStorage();
+    } catch (e) {}
   }
 
   // 📌 Pin & Unpin Handlers
@@ -1063,7 +1021,7 @@
 
   async function unpinMessage() {
     try {
-      const res = await apiFetch('/unpin', { method: 'POST' });
+      const res = await fetch('/unpin', { method: 'POST' });
       if (res.ok) {
         currentPinnedId = null;
         updatePinnedBar();
@@ -1155,11 +1113,12 @@
 
     // 3. Send in background
     try {
-      const res = await apiFetch('/send/text', {
+      const res = await fetch('/send/text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: text,
+          device: deviceName,
           is_view_once: isVO,
           is_private: isPrivate,
           recipient: recipient
@@ -1192,12 +1151,6 @@
     }
 
     Array.from(fileList).forEach(file => {
-      // 📏 Server-side limit (Vercel ~4.5MB) — pehle hi client par check
-      if (file.size > maxFileMB * 1024 * 1024) {
-        showToast(`${file.name} ${maxFileMB}MB se bada hai — compress karke bhejo`, 'error');
-        return;
-      }
-
       const formData = new FormData();
       formData.append('file', file);
       formData.append('sender', deviceName);
@@ -1342,32 +1295,23 @@
     showToast('Message deleted', 'info');
 
     try {
-      await apiFetch(`/history/${id}`, { method: 'DELETE' });
+      await fetch(`/history/${id}?sender=${encodeURIComponent(deviceName)}`, { method: 'DELETE' });
     } catch (err) {}
   }
 
   async function clearAllHistory() {
-    if (!confirm('Are you sure you want to clear all history? (Admin action)')) return;
-    const passcode = prompt('Admin passcode daalo (ROOM_PASSCODE):');
-    if (!passcode) return;
+    if (!confirm('Are you sure you want to clear all history?')) return;
     try {
-      const res = await apiFetch('/history', {
-        method: 'DELETE',
-        headers: { 'X-Passcode': passcode }
-      });
+      const res = await fetch('/history', { method: 'DELETE' });
       if (res.ok) {
         items = [];
         currentPinnedId = null;
         updatePinnedBar();
         renderFeed();
         showToast('History cleared', 'info');
-      } else if (res.status === 401) {
-        showToast('Admin passcode galat hai', 'error');
       }
     } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'setup required') {
-        showToast('Failed to clear history', 'error');
-      }
+      showToast('Failed to clear history', 'error');
     }
   }
 
@@ -1485,31 +1429,282 @@
     scrollToBottom();
   }
 
+  // ==========================================================
+  // 🛡️ Privacy & Passcode Lock Management
+  // ==========================================================
+  function initPrivacySuite() {
+    updatePasscodeUI();
+
+    if (chkAutolock) chkAutolock.checked = isAutoLockEnabled;
+    if (chkIncognito) chkIncognito.checked = isIncognitoMode;
+
+    // Auto-lock if passcode is active and session not yet unlocked
+    if (currentPasscode) {
+      const isSessionUnlocked = sessionStorage.getItem('airlink_session_unlocked') === 'true';
+      if (!isSessionUnlocked) {
+        lockApp();
+      }
+    }
+
+    // Auto-lock when tab is switched/minimized
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden' && isAutoLockEnabled && currentPasscode) {
+        lockApp();
+      }
+    });
+
+    // Handle physical keyboard typing for PIN screen
+    window.addEventListener('keydown', (e) => {
+      if (lockScreenOverlay && !lockScreenOverlay.classList.contains('hidden')) {
+        if (e.key >= '0' && e.key <= '9') {
+          handlePinDigit(e.key);
+        } else if (e.key === 'Backspace') {
+          handlePinBackspace();
+        } else if (e.key === 'Escape' && isPasscodeSetupMode) {
+          exitLockScreen();
+        }
+      }
+    });
+  }
+
+  function updatePasscodeUI() {
+    if (headerLockIcon) {
+      headerLockIcon.textContent = currentPasscode ? '🔒' : '🔓';
+    }
+    if (passcodeStatusLabel) {
+      passcodeStatusLabel.textContent = currentPasscode ? 'Passcode Enabled (4-Digit PIN)' : 'No passcode configured';
+    }
+    if (btnManagePasscode) {
+      btnManagePasscode.textContent = currentPasscode ? 'Change / Remove' : 'Set PIN';
+    }
+  }
+
+  function lockApp() {
+    isPasscodeSetupMode = false;
+    enteredPin = '';
+    updatePinDots();
+    if (lockScreenTitle) lockScreenTitle.textContent = 'AirLink Locked';
+    if (lockScreenDesc) lockScreenDesc.textContent = 'Enter 4-digit PIN to access messages';
+    if (btnKeyCancel) btnKeyCancel.style.visibility = 'hidden';
+    if (lockScreenOverlay) lockScreenOverlay.classList.remove('hidden');
+    sessionStorage.removeItem('airlink_session_unlocked');
+  }
+
+  function unlockApp() {
+    if (lockScreenOverlay) lockScreenOverlay.classList.add('hidden');
+    sessionStorage.setItem('airlink_session_unlocked', 'true');
+    enteredPin = '';
+    updatePinDots();
+    showToast('AirLink Unlocked 🔓', 'success');
+  }
+
+  function exitLockScreen() {
+    if (lockScreenOverlay) lockScreenOverlay.classList.add('hidden');
+    enteredPin = '';
+    isPasscodeSetupMode = false;
+    updatePinDots();
+  }
+
+  function startSetPasscodeFlow() {
+    isPasscodeSetupMode = true;
+    passcodeStep = 1;
+    candidatePin = '';
+    enteredPin = '';
+    updatePinDots();
+    if (lockScreenTitle) lockScreenTitle.textContent = 'Set New Passcode';
+    if (lockScreenDesc) lockScreenDesc.textContent = 'Enter a 4-digit PIN for your chat';
+    if (btnKeyCancel) btnKeyCancel.style.visibility = 'visible';
+    if (lockScreenOverlay) lockScreenOverlay.classList.remove('hidden');
+  }
+
+  function updatePinDots() {
+    if (!pinDots) return;
+    const dots = pinDots.querySelectorAll('.tg-pin-dot');
+    dots.forEach((dot, idx) => {
+      dot.classList.toggle('filled', idx < enteredPin.length);
+    });
+  }
+
+  function shakePinDots() {
+    if (!pinDots) return;
+    pinDots.classList.add('error');
+    if (navigator.vibrate) navigator.vibrate(200);
+    setTimeout(() => {
+      pinDots.classList.remove('error');
+      enteredPin = '';
+      updatePinDots();
+    }, 450);
+  }
+
+  function handlePinDigit(digit) {
+    if (enteredPin.length >= 4) return;
+    enteredPin += digit;
+    updatePinDots();
+
+    if (enteredPin.length === 4) {
+      setTimeout(() => {
+        if (isPasscodeSetupMode) {
+          if (passcodeStep === 1) {
+            candidatePin = enteredPin;
+            enteredPin = '';
+            passcodeStep = 2;
+            updatePinDots();
+            if (lockScreenTitle) lockScreenTitle.textContent = 'Confirm Passcode';
+            if (lockScreenDesc) lockScreenDesc.textContent = 'Re-enter your 4-digit PIN to confirm';
+          } else if (passcodeStep === 2) {
+            if (enteredPin === candidatePin) {
+              currentPasscode = enteredPin;
+              localStorage.setItem('airlink_passcode', enteredPin);
+              sessionStorage.setItem('airlink_session_unlocked', 'true');
+              exitLockScreen();
+              updatePasscodeUI();
+              showToast('Passcode Set Successfully! 🔒', 'success');
+            } else {
+              showToast('PINs did not match! Try again', 'error');
+              shakePinDots();
+              passcodeStep = 1;
+              candidatePin = '';
+              if (lockScreenTitle) lockScreenTitle.textContent = 'Set New Passcode';
+              if (lockScreenDesc) lockScreenDesc.textContent = 'Enter a 4-digit PIN for your chat';
+            }
+          }
+        } else {
+          // Unlock verification
+          if (enteredPin === currentPasscode) {
+            unlockApp();
+          } else {
+            shakePinDots();
+            showToast('Incorrect Passcode ❌', 'error');
+          }
+        }
+      }, 150);
+    }
+  }
+
+  function handlePinBackspace() {
+    if (enteredPin.length > 0) {
+      enteredPin = enteredPin.slice(0, -1);
+      updatePinDots();
+    }
+  }
+
   // Setup Event Listeners
   function setupEventListeners() {
+    // 🔒 Passcode Privacy Header Button
+    if (btnHeaderLock) {
+      btnHeaderLock.addEventListener('click', () => {
+        if (currentPasscode) {
+          lockApp();
+        } else {
+          startSetPasscodeFlow();
+        }
+      });
+    }
+
+    // 🛡️ Privacy Menu Item
+    if (btnMenuPrivacy) {
+      btnMenuPrivacy.addEventListener('click', () => {
+        moreMenuDropdown.classList.remove('show');
+        if (privacySettingsModal) privacySettingsModal.classList.remove('hidden');
+      });
+    }
+
+    if (btnClosePrivacy) {
+      btnClosePrivacy.addEventListener('click', () => {
+        if (privacySettingsModal) privacySettingsModal.classList.add('hidden');
+      });
+    }
+
+    if (btnManagePasscode) {
+      btnManagePasscode.addEventListener('click', () => {
+        if (privacySettingsModal) privacySettingsModal.classList.add('hidden');
+        if (currentPasscode) {
+          if (confirm('Do you want to REMOVE the passcode lock?')) {
+            currentPasscode = '';
+            localStorage.removeItem('airlink_passcode');
+            sessionStorage.removeItem('airlink_session_unlocked');
+            updatePasscodeUI();
+            showToast('Passcode removed 🔓', 'info');
+          } else {
+            startSetPasscodeFlow();
+          }
+        } else {
+          startSetPasscodeFlow();
+        }
+      });
+    }
+
+    if (chkAutolock) {
+      chkAutolock.addEventListener('change', (e) => {
+        isAutoLockEnabled = e.target.checked;
+        localStorage.setItem('airlink_autolock', isAutoLockEnabled);
+        showToast(`Auto-lock on tab switch: ${isAutoLockEnabled ? 'ON' : 'OFF'}`, 'info');
+      });
+    }
+
+    if (chkIncognito) {
+      chkIncognito.addEventListener('change', (e) => {
+        isIncognitoMode = e.target.checked;
+        localStorage.setItem('airlink_incognito', isIncognitoMode);
+        if (isIncognitoMode) {
+          localStorage.removeItem(CACHE_KEY);
+          showToast('Ghost / Incognito Mode: ON 🛡️', 'info');
+        } else {
+          saveHistoryToLocalStorage();
+          showToast('Incognito Mode: OFF', 'info');
+        }
+      });
+    }
+
+    // PIN Keypad clicks
+    if (pinKeypad) {
+      pinKeypad.addEventListener('click', (e) => {
+        const btn = e.target.closest('.tg-key-btn');
+        if (!btn) return;
+        const key = btn.dataset.key;
+        if (key !== undefined) {
+          handlePinDigit(key);
+        }
+      });
+    }
+
+    if (btnKeyBackspace) {
+      btnKeyBackspace.addEventListener('click', handlePinBackspace);
+    }
+
+    if (btnKeyCancel) {
+      btnKeyCancel.addEventListener('click', () => {
+        if (isPasscodeSetupMode) {
+          exitLockScreen();
+        }
+      });
+    }
+
     // 🔒 Exit Private DM Mode
     if (btnExitDm) {
       btnExitDm.addEventListener('click', exitDmMode);
     }
 
-    // 1️⃣ Join Room (name + passcode → verified session)
+
+    // 1️⃣ First-time Name Setup Save
     if (btnSaveInitialName) {
-      btnSaveInitialName.addEventListener('click', joinRoom);
-      initialNameInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          if (initialPasscodeInput) initialPasscodeInput.focus();
-          else joinRoom();
+      btnSaveInitialName.addEventListener('click', () => {
+        const name = initialNameInput.value.trim();
+        if (!name) {
+          showToast('Please enter your name', 'error');
+          initialNameInput.focus();
+          return;
         }
+        localStorage.setItem('airlink_user_name', name);
+        currentUserName = name;
+        deviceName = name;
+        currentDeviceTag.textContent = name;
+        nameModal.classList.add('hidden');
+        showToast(`Welcome, ${name}! ✈️`, 'success');
       });
-      if (initialPasscodeInput) {
-        initialPasscodeInput.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            joinRoom();
-          }
-        });
-      }
+      initialNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') btnSaveInitialName.click();
+      });
     }
 
     // ✏️ Change Name Flow with Announcement
@@ -1541,30 +1736,27 @@
         }
 
         const oldName = currentUserName || 'Someone';
+        localStorage.setItem('airlink_user_name', newName);
+        currentUserName = newName;
+        deviceName = newName;
+        currentDeviceTag.textContent = newName;
+        changeNameModal.classList.add('hidden');
 
-        // Server-side rename — system broadcast + fresh token (v2.0)
+        // Broadcast name change alert to everyone in chat!
         try {
-          const res = await apiFetch('/auth/rename', {
+          await fetch('/send/text', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ new_name: newName })
+            body: JSON.stringify({
+              text: `📢 "${oldName}" changed their name to "${newName}"`,
+              device: newName,
+              type: 'system'
+            })
           });
-          if (!res.ok) {
-            let msg = 'Rename failed';
-            try { const d = await res.json(); msg = d.detail || msg; } catch (e) {}
-            showToast(String(msg), 'error');
-            return;
-          }
-          const data = await res.json();
-          if (data.token) Session.token = data.token;
-          storage.setItem('airlink_user_name', newName);
-          currentUserName = newName;
-          deviceName = newName;
-          currentDeviceTag.textContent = newName;
-          changeNameModal.classList.add('hidden');
           fetchHistory();
-          showToast(`Name updated to ${newName} 📢 (pehle: ${oldName})`, 'success');
         } catch (e) {}
+
+        showToast(`Name updated to ${newName} 📢`, 'success');
       });
       newNameInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') btnConfirmChangeName.click();
@@ -1669,14 +1861,14 @@
     // Settings Toggles
     btnToggleSound.addEventListener('click', () => {
       isSoundEnabled = !isSoundEnabled;
-      storage.setItem('airlink_sound', isSoundEnabled);
+      localStorage.setItem('airlink_sound', isSoundEnabled);
       soundIcon.textContent = isSoundEnabled ? '🔔' : '🔕';
       showToast(`Sound: ${isSoundEnabled ? 'Enabled' : 'Muted'}`, 'info');
     });
 
     btnToggleAutoCopy.addEventListener('click', () => {
       isAutoCopyEnabled = !isAutoCopyEnabled;
-      storage.setItem('airlink_autocopy', isAutoCopyEnabled);
+      localStorage.setItem('airlink_autocopy', isAutoCopyEnabled);
       autoCopyIcon.textContent = isAutoCopyEnabled ? '📋' : '📑';
       showToast(`Auto-copy: ${isAutoCopyEnabled ? 'ON' : 'OFF'}`, 'info');
       moreMenuDropdown.classList.remove('show');
@@ -1694,38 +1886,21 @@
 
     btnClearHistory.addEventListener('click', clearAllHistory);
 
-    // QR Modal (v2.0 — backend se fresh QR + current URL)
+    // QR Modal
     if (btnQrModal) {
-      btnQrModal.addEventListener('click', () => {
-        qrModal.classList.remove('hidden');
-        populateNetworkIPs();
-      });
-    }
-    if (btnShowQrMenu) {
-      btnShowQrMenu.addEventListener('click', () => {
-        moreMenuDropdown.classList.remove('show');
-        qrModal.classList.remove('hidden');
-        populateNetworkIPs();
-      });
+      btnQrModal.addEventListener('click', () => qrModal.classList.remove('hidden'));
     }
     if (btnCloseQrModal) {
       btnCloseQrModal.addEventListener('click', () => qrModal.classList.add('hidden'));
     }
+    if (ipSelect) {
+      ipSelect.addEventListener('change', updateSelectedIP);
+    }
     if (btnCopyUrl) {
       btnCopyUrl.addEventListener('click', () => {
-        navigator.clipboard.writeText(directUrlInput.value || window.location.origin).then(() => {
+        navigator.clipboard.writeText(directUrlInput.value).then(() => {
           showToast('URL copied to clipboard!', 'success');
         });
-      });
-    }
-
-    // 🚪 Logout
-    if (btnLogout) {
-      btnLogout.addEventListener('click', () => {
-        moreMenuDropdown.classList.remove('show');
-        if (confirm('Logout karna hai? Local cache bhi clear ho jayega.')) {
-          logout();
-        }
       });
     }
 

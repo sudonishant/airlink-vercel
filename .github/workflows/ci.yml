@@ -22,8 +22,8 @@ jobs:
 
       - name: Python syntax + lint
         run: |
-          python -m compileall api/index.py migrate_from_gist.py
-          ruff check api/index.py migrate_from_gist.py --select E9,F,B --ignore B008
+          python -m compileall api/index.py
+          ruff check api/index.py --select E9,F,B --ignore B008
 
       - name: HTML sanity (div balance)
         run: |
