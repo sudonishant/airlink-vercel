@@ -12,7 +12,7 @@ Telegram-style UI • PWA (installable) • Photos, Files & Voice Notes • Priv
 
 ---
  
-## 📖 Ye kya hai
+## 📖 Ye kya hai  
 
 AirLink ek lightweight private chat app hai — phone, PC, doston ke beech instant messages, photos, files aur voice notes bhejne ke liye. Install karo (PWA), passcode se join karo, aur chatting shuru.
 
