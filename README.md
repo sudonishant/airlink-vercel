@@ -6,7 +6,7 @@
 
 Telegram-style UI • PWA (installable) • Photos, Files & Voice Notes • Private DMs • View-Once • Emoji Reactions • Online Presence
 
-`Vercel Serverless` + `Supabase (Postgres + Storage)` — **₹0 pe chalta hai**
+`Vercel Serverless` + `Supabase (Postgres + Storage)` — **₹0 pe chalta hai**  
  
 </div>
 
